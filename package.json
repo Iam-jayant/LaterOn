@@ -1,0 +1,17 @@
+{
+  "name": "lateron-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.15.0",
+  "scripts": {
+    "dev:web": "pnpm --filter @lateron/web dev",
+    "dev:admin": "pnpm --filter @lateron/admin dev",
+    "dev:api": "pnpm --filter @lateron/api dev",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  }
+}
