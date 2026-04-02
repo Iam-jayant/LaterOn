@@ -1,0 +1,29 @@
+node_modules
+.pnpm-store
+.next
+dist
+coverage
+.turbo
+*.tsbuildinfo
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Env files
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__
+*.pyc
+.venv
+.pytest_cache
+
+# IDE/OS
+.DS_Store
+Thumbs.db
+.idea
+.vscode
