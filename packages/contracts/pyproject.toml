@@ -7,6 +7,8 @@ packages = [{ include = "lateron", from = "src" }]
 
 [tool.poetry.dependencies]
 python = "^3.11"
+pyteal = "^0.27.0"
+py-algorand-sdk = "^2.10.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.3"

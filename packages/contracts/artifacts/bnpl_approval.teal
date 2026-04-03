@@ -1,0 +1,636 @@
+#pragma version 8
+txn ApplicationID
+int 0
+==
+bnz main_l34
+txn OnCompletion
+int DeleteApplication
+==
+bnz main_l33
+txn OnCompletion
+int UpdateApplication
+==
+bnz main_l32
+txn OnCompletion
+int CloseOut
+==
+bnz main_l31
+txn OnCompletion
+int OptIn
+==
+bnz main_l30
+txn OnCompletion
+int ClearState
+==
+bnz main_l29
+txn OnCompletion
+int NoOp
+==
+bnz main_l8
+err
+main_l8:
+txn TypeEnum
+int appl
+==
+assert
+txn NumAppArgs
+int 0
+>
+assert
+txna ApplicationArgs 0
+byte "create_plan"
+==
+bnz main_l28
+txna ApplicationArgs 0
+byte "repay_installment"
+==
+bnz main_l25
+txna ApplicationArgs 0
+byte "settle_risk"
+==
+bnz main_l14
+txna ApplicationArgs 0
+byte "set_paused"
+==
+bnz main_l13
+err
+main_l13:
+txn Sender
+byte "admin"
+app_global_get
+==
+assert
+txn NumAppArgs
+int 2
+>=
+assert
+txna ApplicationArgs 1
+btoi
+int 0
+==
+txna ApplicationArgs 1
+btoi
+int 1
+==
+|
+assert
+byte "paused"
+txna ApplicationArgs 1
+btoi
+app_global_put
+int 1
+return
+main_l14:
+byte "paused"
+app_global_get
+int 0
+==
+assert
+txn NumAppArgs
+int 3
+>=
+assert
+byte "plan_"
+txna ApplicationArgs 1
+btoi
+itob
+concat
+int 64
+int 1
+box_extract
+btoi
+int 0
+==
+byte "plan_"
+txna ApplicationArgs 1
+btoi
+itob
+concat
+int 64
+int 1
+box_extract
+btoi
+int 1
+==
+|
+assert
+txna ApplicationArgs 2
+btoi
+byte "plan_"
+txna ApplicationArgs 1
+btoi
+itob
+concat
+int 56
+int 8
+box_extract
+btoi
+>
+assert
+byte "plan_"
+txna ApplicationArgs 1
+btoi
+itob
+concat
+int 64
+txna ApplicationArgs 2
+btoi
+byte "plan_"
+txna ApplicationArgs 1
+btoi
+itob
+concat
+int 56
+int 8
+box_extract
+btoi
+-
+int 1296000
+>=
+bnz main_l24
+txna ApplicationArgs 2
+btoi
+byte "plan_"
+txna ApplicationArgs 1
+btoi
+itob
+concat
+int 56
+int 8
+box_extract
+btoi
+-
+int 604800
+>=
+bnz main_l23
+byte "plan_"
+txna ApplicationArgs 1
+btoi
+itob
+concat
+int 64
+int 1
+box_extract
+btoi
+main_l17:
+itob
+extract 7 1
+box_replace
+byte "SETTLE:"
+txna ApplicationArgs 1
+btoi
+itob
+concat
+byte "plan_"
+txna ApplicationArgs 1
+btoi
+itob
+concat
+int 64
+int 1
+box_extract
+btoi
+itob
+extract 7 1
+concat
+txna ApplicationArgs 2
+btoi
+byte "plan_"
+txna ApplicationArgs 1
+btoi
+itob
+concat
+int 56
+int 8
+box_extract
+btoi
+-
+int 1296000
+>=
+bnz main_l22
+txna ApplicationArgs 2
+btoi
+byte "plan_"
+txna ApplicationArgs 1
+btoi
+itob
+concat
+int 56
+int 8
+box_extract
+btoi
+-
+int 604800
+>=
+bnz main_l21
+byte "plan_"
+txna ApplicationArgs 1
+btoi
+itob
+concat
+int 64
+int 1
+box_extract
+btoi
+main_l20:
+itob
+extract 7 1
+concat
+txna ApplicationArgs 2
+btoi
+byte "plan_"
+txna ApplicationArgs 1
+btoi
+itob
+concat
+int 56
+int 8
+box_extract
+btoi
+-
+int 86400
+/
+itob
+concat
+log
+int 1
+return
+main_l21:
+int 1
+b main_l20
+main_l22:
+int 2
+b main_l20
+main_l23:
+int 1
+b main_l17
+main_l24:
+int 2
+b main_l17
+main_l25:
+byte "paused"
+app_global_get
+int 0
+==
+assert
+txn NumAppArgs
+int 3
+>=
+assert
+txna ApplicationArgs 2
+btoi
+int 0
+>
+assert
+txna ApplicationArgs 2
+btoi
+byte "plan_"
+txna ApplicationArgs 1
+btoi
+itob
+concat
+int 40
+int 8
+box_extract
+btoi
+<=
+assert
+byte "plan_"
+txna ApplicationArgs 1
+btoi
+itob
+concat
+int 40
+byte "plan_"
+txna ApplicationArgs 1
+btoi
+itob
+concat
+int 40
+int 8
+box_extract
+btoi
+txna ApplicationArgs 2
+btoi
+-
+itob
+box_replace
+byte "plan_"
+txna ApplicationArgs 1
+btoi
+itob
+concat
+int 48
+byte "plan_"
+txna ApplicationArgs 1
+btoi
+itob
+concat
+int 48
+int 8
+box_extract
+btoi
+int 1
++
+itob
+box_replace
+byte "plan_"
+txna ApplicationArgs 1
+btoi
+itob
+concat
+int 40
+int 8
+box_extract
+btoi
+txna ApplicationArgs 2
+btoi
+-
+int 0
+==
+bnz main_l27
+main_l26:
+byte "tr"
+byte "tr"
+app_global_get
+txna ApplicationArgs 2
+btoi
++
+app_global_put
+byte "REPAY:"
+txna ApplicationArgs 1
+btoi
+itob
+concat
+txna ApplicationArgs 2
+btoi
+itob
+concat
+byte "plan_"
+txna ApplicationArgs 1
+btoi
+itob
+concat
+int 40
+int 8
+box_extract
+btoi
+txna ApplicationArgs 2
+btoi
+-
+itob
+concat
+log
+int 1
+return
+main_l27:
+byte "plan_"
+txna ApplicationArgs 1
+btoi
+itob
+concat
+int 64
+int 3
+itob
+extract 7 1
+box_replace
+b main_l26
+main_l28:
+byte "paused"
+app_global_get
+int 0
+==
+assert
+txn NumAppArgs
+int 7
+>=
+assert
+txna ApplicationArgs 1
+len
+int 32
+==
+assert
+txna ApplicationArgs 4
+len
+int 32
+==
+assert
+txna ApplicationArgs 2
+btoi
+int 0
+>
+assert
+txna ApplicationArgs 3
+btoi
+int 0
+>
+assert
+txna ApplicationArgs 5
+btoi
+global LatestTimestamp
+>
+assert
+txna ApplicationArgs 6
+btoi
+int 0
+==
+txna ApplicationArgs 6
+btoi
+int 1
+==
+|
+txna ApplicationArgs 6
+btoi
+int 2
+==
+|
+assert
+global GroupSize
+int 3
+==
+assert
+gtxn 0 TypeEnum
+int pay
+==
+assert
+gtxn 0 Sender
+txna ApplicationArgs 1
+==
+assert
+gtxn 0 Receiver
+txna ApplicationArgs 4
+==
+assert
+gtxn 0 Amount
+txna ApplicationArgs 3
+btoi
+==
+assert
+gtxn 1 TypeEnum
+int appl
+==
+assert
+gtxna 1 ApplicationArgs 0
+byte "lend_out"
+==
+assert
+gtxna 1 ApplicationArgs 1
+btoi
+txna ApplicationArgs 2
+btoi
+==
+assert
+txn GroupIndex
+int 2
+==
+assert
+byte "plan_"
+byte "pc"
+app_global_get
+int 1
++
+itob
+concat
+int 66
+box_create
+pop
+byte "plan_"
+byte "pc"
+app_global_get
+int 1
++
+itob
+concat
+int 0
+txna ApplicationArgs 1
+box_replace
+byte "plan_"
+byte "pc"
+app_global_get
+int 1
++
+itob
+concat
+int 32
+txna ApplicationArgs 2
+btoi
+itob
+box_replace
+byte "plan_"
+byte "pc"
+app_global_get
+int 1
++
+itob
+concat
+int 40
+txna ApplicationArgs 2
+btoi
+itob
+box_replace
+byte "plan_"
+byte "pc"
+app_global_get
+int 1
++
+itob
+concat
+int 48
+int 0
+itob
+box_replace
+byte "plan_"
+byte "pc"
+app_global_get
+int 1
++
+itob
+concat
+int 56
+txna ApplicationArgs 5
+btoi
+itob
+box_replace
+byte "plan_"
+byte "pc"
+app_global_get
+int 1
++
+itob
+concat
+int 64
+int 0
+itob
+extract 7 1
+box_replace
+byte "plan_"
+byte "pc"
+app_global_get
+int 1
++
+itob
+concat
+int 65
+txna ApplicationArgs 6
+btoi
+itob
+extract 7 1
+box_replace
+byte "pc"
+byte "pc"
+app_global_get
+int 1
++
+app_global_put
+byte "tf"
+byte "tf"
+app_global_get
+txna ApplicationArgs 2
+btoi
++
+app_global_put
+int 1
+return
+main_l29:
+int 1
+return
+main_l30:
+int 0
+return
+main_l31:
+int 1
+return
+main_l32:
+txn Sender
+byte "admin"
+app_global_get
+==
+assert
+int 1
+return
+main_l33:
+txn Sender
+byte "admin"
+app_global_get
+==
+assert
+int 1
+return
+main_l34:
+byte "admin"
+txn Sender
+app_global_put
+byte "paused"
+int 0
+app_global_put
+byte "pc"
+int 0
+app_global_put
+byte "tf"
+int 0
+app_global_put
+byte "tr"
+int 0
+app_global_put
+int 1
+return
