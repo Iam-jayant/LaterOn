@@ -21,6 +21,16 @@ This repository now contains a production-oriented monorepo baseline for the ALG
 - Risk detection may happen off-chain, but authoritative state transitions are materialized on-chain (`settle_risk`)
 - If pool liquidity is insufficient, checkout returns a generic internal error message to user while logging structured diagnostics
 
+## API Security Baseline (Implemented)
+
+- Wallet auth challenge/verify endpoints:
+  - `POST /v1/auth/challenge`
+  - `POST /v1/auth/verify`
+- Protected borrower/lender API routes require bearer token when `AUTH_REQUIRED=true`
+- Merchant-facing checkout/quote routes enforce `x-merchant-key` when `MERCHANT_AUTH_REQUIRED=true`
+- Checkout and repayment routes enforce idempotency via `x-idempotency-key` when `REQUIRE_IDEMPOTENCY=true`
+- Global per-minute request throttling is active via `RATE_LIMIT_PER_MINUTE`
+
 ## Quick Start
 
 ### Prerequisites
@@ -41,6 +51,12 @@ pnpm install
 
 ```bash
 pnpm --filter @lateron/api dev
+```
+
+Copy API env template before running:
+
+```bash
+cp apps/api/.env.example apps/api/.env
 ```
 
 ### Run borrower web app
