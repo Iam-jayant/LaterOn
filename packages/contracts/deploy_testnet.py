@@ -138,6 +138,56 @@ def resolve_signer(args: argparse.Namespace) -> tuple[str, str]:
     return sender, sender_sk
 
 
+def save_deployed_app_ids(bnpl_app_id: int, pool_app_id: int) -> None:
+    """Save deployed app IDs to .env.deployed file"""
+    env_deployed_path = os.path.join(os.path.dirname(__file__), ".env.deployed")
+    with open(env_deployed_path, "w") as f:
+        f.write(f"BNPL_APP_ID={bnpl_app_id}\n")
+        f.write(f"POOL_APP_ID={pool_app_id}\n")
+    print(f"Saved app IDs to {env_deployed_path}")
+
+
+def run_smoke_tests(client: AlgodClient, sender: str, sender_sk: str, deployed: DeployedApps) -> None:
+    """Run basic smoke tests to verify contracts are callable"""
+    print("\nRunning smoke tests...")
+    
+    # Test 1: Call pool set_paused (admin-only method)
+    try:
+        params = client.suggested_params()
+        set_paused_tx = transaction.ApplicationNoOpTxn(
+            sender=sender,
+            sp=params,
+            index=deployed.pool_app_id,
+            app_args=[b"set_paused", (0).to_bytes(8, "big")],
+        )
+        signed = set_paused_tx.sign(sender_sk)
+        tx_id = client.send_transaction(signed)
+        wait_for_confirmation(client, tx_id)
+        print(f"✓ Pool contract callable (set_paused tx: {tx_id})")
+    except Exception as e:
+        print(f"✗ Pool smoke test failed: {e}")
+        raise
+    
+    # Test 2: Call BNPL set_paused (admin-only method)
+    try:
+        params = client.suggested_params()
+        set_paused_tx = transaction.ApplicationNoOpTxn(
+            sender=sender,
+            sp=params,
+            index=deployed.bnpl_app_id,
+            app_args=[b"set_paused", (0).to_bytes(8, "big")],
+        )
+        signed = set_paused_tx.sign(sender_sk)
+        tx_id = client.send_transaction(signed)
+        wait_for_confirmation(client, tx_id)
+        print(f"✓ BNPL contract callable (set_paused tx: {tx_id})")
+    except Exception as e:
+        print(f"✗ BNPL smoke test failed: {e}")
+        raise
+    
+    print("✓ All smoke tests passed")
+
+
 def main() -> None:
     args = parse_args()
     sender, sender_sk = resolve_signer(args)
@@ -159,6 +209,12 @@ def main() -> None:
     print(f"Deployer: {sender}")
     print(f"BNPL App ID: {deployed.bnpl_app_id}")
     print(f"Liquidity Pool App ID: {deployed.pool_app_id}")
+    
+    # Save app IDs to .env.deployed
+    save_deployed_app_ids(deployed.bnpl_app_id, deployed.pool_app_id)
+    
+    # Run smoke tests
+    run_smoke_tests(client, sender, sender_sk, deployed)
 
 
 if __name__ == "__main__":

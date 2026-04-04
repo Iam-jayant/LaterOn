@@ -95,10 +95,13 @@ def _get_user_outstanding(user_address: Expr) -> Expr:
     """
     box_name = _get_user_box_name(user_address)
     box_exists = App.box_get(box_name)
-    return If(
-        box_exists.hasValue(),
-        Btoi(box_exists.value()),
-        Int(0)
+    return Seq(
+        box_exists,
+        If(
+            box_exists.hasValue(),
+            Btoi(box_exists.value()),
+            Int(0)
+        )
     )
 
 
@@ -110,6 +113,7 @@ def _update_user_outstanding(user_address: Expr, new_outstanding: Expr) -> Expr:
     box_name = _get_user_box_name(user_address)
     box_exists = App.box_get(box_name)
     return Seq(
+        box_exists,
         If(
             box_exists.hasValue(),
             # Box exists, replace the value
