@@ -1,0 +1,246 @@
+:root {
+  /* Neutral Theme Colors */
+  --background: #ffffff;
+  --foreground: oklch(0.145 0 0);
+  --primary: #030213;
+  --accent: #D7E377;
+  --muted: #ececf0;
+  --border: rgba(0, 0, 0, 0.1);
+  
+  /* Typography */
+  --font-sans: var(--font-inter), -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-heading: var(--font-space-grotesk), var(--font-sans);
+  --font-weight-medium: 500;
+  --font-weight-normal: 400;
+  
+  /* Fluid Typography - Responsive font sizes using clamp() */
+  --font-size-h1: clamp(40px, 5vw, 64px);
+  --font-size-h2: clamp(28px, 3.5vw, 40px);
+  --font-size-h3: clamp(18px, 2vw, 22px);
+  --font-size-body: clamp(14px, 1.5vw, 16px);
+  --font-size-small: clamp(12px, 1.2vw, 14px);
+  
+  /* Spacing */
+  --radius: 0.625rem;
+  
+  /* Touch Targets - Minimum sizes for mobile accessibility */
+  --min-touch-target: 44px;
+}
+
+.dark {
+  --background: #030213;
+  --foreground: #ffffff;
+  --primary: #ffffff;
+  --accent: #D7E377;
+  --muted: #1a1a24;
+  --border: rgba(255, 255, 255, 0.1);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-sans);
+  background: var(--background);
+  color: var(--foreground);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.shell {
+  width: min(1100px, 92vw);
+  margin: 0 auto;
+}
+
+.site-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 22px 0;
+}
+
+.brand {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.brand small {
+  display: block;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.nav {
+  display: flex;
+  gap: 18px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.hero {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 32px;
+  padding: 36px 0 26px;
+}
+
+.card {
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--background);
+  padding: 24px;
+  box-shadow: 0 10px 30px rgba(37, 55, 43, 0.06);
+}
+
+.eyebrow {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+h1 {
+  margin: 12px 0;
+  font-size: var(--font-size-h1);
+  line-height: 1.05;
+}
+
+h2 {
+  font-size: var(--font-size-h2);
+  line-height: 1.2;
+}
+
+h3 {
+  font-size: var(--font-size-h3);
+  line-height: 1.3;
+}
+
+p {
+  margin: 0;
+  line-height: 1.65;
+  color: var(--muted);
+}
+
+.actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+button,
+.button {
+  border: 1px solid transparent;
+  background: var(--primary);
+  color: var(--background);
+  border-radius: 11px;
+  padding: 11px 16px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+button.secondary,
+.button.secondary {
+  background: transparent;
+  color: var(--foreground);
+  border-color: var(--border);
+}
+
+/* Touch-friendly button sizes for mobile */
+@media (max-width: 768px) {
+  button,
+  .button,
+  a[role="button"] {
+    min-height: var(--min-touch-target);
+    min-width: var(--min-touch-target);
+    padding: 12px 20px;
+  }
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 30px;
+}
+
+.grid h3 {
+  margin: 8px 0 6px;
+}
+
+.stats {
+  margin-top: 20px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.stat {
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--background);
+}
+
+.stat strong {
+  display: block;
+  font-size: 22px;
+}
+
+.section {
+  margin: 26px 0 44px;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table th,
+.table td {
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  padding: 10px 0;
+  font-size: 14px;
+}
+
+.badge {
+  display: inline-block;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 11px;
+  padding: 4px 10px;
+}
+
+.wallet-row {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.error {
+  margin-top: 10px;
+  color: #dc2626;
+  font-size: 14px;
+}
+
+@media (max-width: 900px) {
+  .hero {
+    grid-template-columns: 1fr;
+  }
+
+  .grid,
+  .stats {
+    grid-template-columns: 1fr;
+  }
+
+  .nav {
+    display: none;
+  }
+}
