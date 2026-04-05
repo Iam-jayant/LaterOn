@@ -8,9 +8,45 @@ export class WalletService {
   private deflyWallet: any = null;
   private connectedWallet: WalletType | null = null;
   private connectedAddress: string | null = null;
+  private readonly STORAGE_KEY = 'lateron_wallet_connection';
 
   constructor() {
     // Lazy initialization to avoid SSR issues
+    if (typeof window !== 'undefined') {
+      this.restoreConnection();
+    }
+  }
+
+  private restoreConnection(): void {
+    try {
+      const stored = localStorage.getItem(this.STORAGE_KEY);
+      if (stored) {
+        const { walletType, address } = JSON.parse(stored);
+        this.connectedWallet = walletType;
+        this.connectedAddress = address;
+      }
+    } catch (err) {
+      console.error('Failed to restore wallet connection:', err);
+    }
+  }
+
+  private saveConnection(): void {
+    if (typeof window === 'undefined') return;
+    
+    if (this.connectedWallet && this.connectedAddress) {
+      localStorage.setItem(
+        this.STORAGE_KEY,
+        JSON.stringify({
+          walletType: this.connectedWallet,
+          address: this.connectedAddress,
+        })
+      );
+    }
+  }
+
+  private clearConnection(): void {
+    if (typeof window === 'undefined') return;
+    localStorage.removeItem(this.STORAGE_KEY);
   }
 
   private async ensureWallets() {
@@ -57,7 +93,52 @@ export class WalletService {
     
     this.connectedWallet = walletType;
     this.connectedAddress = accounts[0];
+    this.saveConnection();
     return this.connectedAddress;
+  }
+
+  async reconnect(): Promise<string | null> {
+    if (!this.connectedWallet) return null;
+    
+    try {
+      await this.ensureWallets();
+      let accounts: string[] = [];
+      
+      switch (this.connectedWallet) {
+        case "lute":
+          // Lute doesn't have auto-reconnect, keep stored address
+          if (this.connectedAddress) {
+            return this.connectedAddress;
+          }
+          break;
+        case "pera":
+          accounts = await this.peraWallet.reconnectSession();
+          break;
+        case "defly":
+          accounts = await this.deflyWallet.reconnectSession();
+          break;
+      }
+      
+      if (accounts && accounts.length > 0) {
+        this.connectedAddress = accounts[0];
+        this.saveConnection();
+        return this.connectedAddress;
+      }
+      
+      // If reconnection failed, clear stored connection
+      if (!this.connectedAddress) {
+        this.clearConnection();
+        this.connectedWallet = null;
+      }
+      
+      return this.connectedAddress;
+    } catch (err) {
+      console.error('Failed to reconnect wallet:', err);
+      this.clearConnection();
+      this.connectedWallet = null;
+      this.connectedAddress = null;
+      return null;
+    }
   }
 
   async disconnect(): Promise<void> {
@@ -79,6 +160,7 @@ export class WalletService {
     
     this.connectedWallet = null;
     this.connectedAddress = null;
+    this.clearConnection();
   }
 
   async signTransaction(txns: algosdk.Transaction[]): Promise<Uint8Array[]> {
