@@ -1,4 +1,4 @@
-import { RISK_POLICY } from "./constants";
+import { RISK_POLICY, SCORE_POLICY } from "./constants";
 import type { PlanRecord, PlanStatus, RiskTransitionResult, UserProfile } from "./types";
 
 export const determineTier = (profile: UserProfile): UserProfile["tier"] => {
@@ -74,4 +74,61 @@ export const applyRiskOutcomeToProfile = (
   }
 
   return updated;
+};
+
+/**
+ * Update LaterOn Score for on-time installment payment.
+ * Increases score by SCORE_POLICY.onTimePaymentIncrease.
+ * 
+ * @param profile - User profile to update
+ * @returns Updated profile with increased score
+ */
+export const applyOnTimePaymentScoreIncrease = (profile: UserProfile): UserProfile => {
+  const newScore = Math.min(
+    profile.laterOnScore + SCORE_POLICY.onTimePaymentIncrease,
+    SCORE_POLICY.maxScore
+  );
+  
+  return {
+    ...profile,
+    laterOnScore: newScore
+  };
+};
+
+/**
+ * Apply completion bonus to LaterOn Score when all installments are paid.
+ * Increases score by SCORE_POLICY.completionBonus.
+ * 
+ * @param profile - User profile to update
+ * @returns Updated profile with completion bonus applied
+ */
+export const applyCompletionBonus = (profile: UserProfile): UserProfile => {
+  const newScore = Math.min(
+    profile.laterOnScore + SCORE_POLICY.completionBonus,
+    SCORE_POLICY.maxScore
+  );
+  
+  return {
+    ...profile,
+    laterOnScore: newScore
+  };
+};
+
+/**
+ * Decrease LaterOn Score for overdue installment.
+ * Decreases score by SCORE_POLICY.overdueDecrease.
+ * 
+ * @param profile - User profile to update
+ * @returns Updated profile with decreased score
+ */
+export const applyOverdueScoreDecrease = (profile: UserProfile): UserProfile => {
+  const newScore = Math.max(
+    profile.laterOnScore - SCORE_POLICY.overdueDecrease,
+    SCORE_POLICY.minScore
+  );
+  
+  return {
+    ...profile,
+    laterOnScore: newScore
+  };
 };

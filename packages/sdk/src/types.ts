@@ -24,6 +24,7 @@ export interface UserProfile {
   latePayments: number;
   activeOutstandingInr: number;
   bannedUntilUnix?: number;
+  laterOnScore: number;
 }
 
 export interface CheckoutQuote {
@@ -48,6 +49,15 @@ export interface RepaymentScheduleItem {
   amountAlgo: number;
 }
 
+export interface GiftCardMetadata {
+  productId: number;
+  productName: string;
+  denomination: number;
+  code: string;
+  pin: string;
+  reloadlyTransactionId: number;
+}
+
 export interface PlanRecord {
   planId: string;
   walletAddress: string;
@@ -63,6 +73,7 @@ export interface PlanRecord {
   remainingAmountAlgo: number;
   installmentsPaid: number;
   installments: RepaymentScheduleItem[];
+  giftCardDetails?: GiftCardMetadata;
 }
 
 export interface LiquidityState {

@@ -34,4 +34,13 @@ export const RISK_POLICY = {
   defaultCountForBan: 2
 } as const;
 
+export const SCORE_POLICY = {
+  initialScore: 500,
+  onTimePaymentIncrease: 10,
+  completionBonus: 50,
+  overdueDecrease: 20,
+  minScore: 0,
+  maxScore: 1000
+} as const;
+
 export const USER_SAFE_ERROR_MESSAGE = "Internal error. Please try again.";
