@@ -1,29 +1,64 @@
+# Dependencies
 node_modules
 .pnpm-store
+
+# Build outputs
 .next
 dist
-coverage
-.turbo
+build
 *.tsbuildinfo
+
+# Testing
+coverage
+*.test.ts
+*.test.tsx
+*.test.js
+*.test.jsx
+*.spec.ts
+*.spec.tsx
+vitest.config.ts
+jest.config.js
 
 # Logs
 *.log
 npm-debug.log*
 pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
-# Env files
+# Environment files
 .env
 .env.*
 !.env.example
+!.env.local.example
 
 # Python
 __pycache__
 *.pyc
 .venv
 .pytest_cache
+*.egg-info
+.poetry
 
-# IDE/OS
+# IDE/Editor
 .DS_Store
 Thumbs.db
 .idea
 .vscode
+*.swp
+*.swo
+*~
+desktop.ini
+
+# Turbo
+.turbo
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# OS files
+.DS_Store
+Thumbs.db
+.kiro
