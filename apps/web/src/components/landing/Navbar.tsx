@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
+import { PRIMARY } from '@/lib/colors';
 
 export function Navbar() {
   const [scrolled, setScrolled] = useState(false);
@@ -83,7 +84,7 @@ export function Navbar() {
             <Link
               href="/app"
               style={{
-                background: '#D7E377',
+                background: PRIMARY,
                 border: 'none',
                 cursor: 'pointer',
                 fontFamily: "'Inter', sans-serif",
@@ -104,7 +105,7 @@ export function Navbar() {
                 e.currentTarget.style.transform = 'translateY(-1px)';
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.background = '#D7E377';
+                e.currentTarget.style.background = PRIMARY;
                 e.currentTarget.style.boxShadow = '0 2px 12px rgba(107,122,0,0.22)';
                 e.currentTarget.style.transform = 'translateY(0)';
               }}
@@ -189,7 +190,7 @@ export function Navbar() {
                 href="/app"
                 style={{
                   flex: 1,
-                  background: '#D7E377',
+                  background: PRIMARY,
                   border: 'none',
                   cursor: 'pointer',
                   fontFamily: "'Inter', sans-serif",
@@ -214,7 +215,7 @@ export function Navbar() {
                   e.currentTarget.style.transform = 'translateY(-1px)';
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.background = '#D7E377';
+                  e.currentTarget.style.background = PRIMARY;
                   e.currentTarget.style.boxShadow = '0 2px 12px rgba(107,122,0,0.22)';
                   e.currentTarget.style.transform = 'translateY(0)';
                 }}

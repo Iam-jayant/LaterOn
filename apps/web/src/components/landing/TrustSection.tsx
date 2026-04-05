@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { PRIMARY, BACKGROUND, TEXT, SUCCESS } from '@/lib/colors';
 
 const TRUST_CARDS = [
   {
@@ -115,7 +116,7 @@ export function TrustSection() {
   }, []);
 
   return (
-    <section ref={ref} style={{ background: '#F5F6F0', padding: '96px 32px' }}>
+    <section ref={ref} style={{ background: BACKGROUND, padding: '96px 32px' }}>
       <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
         {/* Header */}
         <div
@@ -132,11 +133,11 @@ export function TrustSection() {
               fontFamily: "'Inter', sans-serif",
               fontSize: '12px',
               fontWeight: 600,
-              color: '#5a6900',
+              color: SUCCESS,
               letterSpacing: '0.1em',
               textTransform: 'uppercase',
-              background: 'rgba(107,122,0,0.08)',
-              border: '1px solid rgba(107,122,0,0.16)',
+              background: `${SUCCESS}14`,
+              border: `1px solid ${SUCCESS}29`,
               padding: '5px 14px',
               borderRadius: '100px',
               display: 'inline-block',
@@ -150,7 +151,7 @@ export function TrustSection() {
               fontFamily: "'Space Grotesk', sans-serif",
               fontWeight: 700,
               fontSize: 'clamp(28px, 3.5vw, 40px)',
-              color: '#0A0C12',
+              color: TEXT,
               letterSpacing: '-0.8px',
               margin: '0 0 12px',
             }}
@@ -161,7 +162,7 @@ export function TrustSection() {
             style={{
               fontFamily: "'Inter', sans-serif",
               fontSize: '16px',
-              color: 'rgba(10,12,18,0.48)',
+              color: `${TEXT}7A`,
               maxWidth: '420px',
               margin: '0 auto',
               lineHeight: 1.6,
@@ -185,7 +186,7 @@ export function TrustSection() {
               key={i}
               style={{
                 background: '#FFFFFF',
-                border: '1px solid rgba(10,12,18,0.07)',
+                border: `1px solid ${TEXT}12`,
                 borderRadius: '20px',
                 padding: '28px',
                 transition: 'all 0.28s ease',
@@ -196,15 +197,15 @@ export function TrustSection() {
               }}
               onMouseEnter={(e) => {
                 const el = e.currentTarget as HTMLDivElement;
-                el.style.boxShadow = '0 12px 36px rgba(10,12,18,0.09)';
+                el.style.boxShadow = `0 12px 36px ${TEXT}17`;
                 el.style.transform = 'translateY(-4px)';
-                el.style.borderColor = 'rgba(107,122,0,0.2)';
+                el.style.borderColor = `${SUCCESS}33`;
               }}
               onMouseLeave={(e) => {
                 const el = e.currentTarget as HTMLDivElement;
                 el.style.boxShadow = 'none';
                 el.style.transform = 'translateY(0)';
-                el.style.borderColor = 'rgba(10,12,18,0.07)';
+                el.style.borderColor = `${TEXT}12`;
               }}
             >
               {/* Icon */}
@@ -213,8 +214,8 @@ export function TrustSection() {
                   width: '52px',
                   height: '52px',
                   borderRadius: '14px',
-                  background: 'rgba(107,122,0,0.09)',
-                  border: '1px solid rgba(107,122,0,0.14)',
+                  background: `${SUCCESS}17`,
+                  border: `1px solid ${SUCCESS}24`,
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -229,7 +230,7 @@ export function TrustSection() {
                   fontFamily: "'Space Grotesk', sans-serif",
                   fontWeight: 700,
                   fontSize: '17px',
-                  color: '#0A0C12',
+                  color: TEXT,
                   margin: '0 0 10px',
                   letterSpacing: '-0.2px',
                 }}
@@ -240,7 +241,7 @@ export function TrustSection() {
                 style={{
                   fontFamily: "'Inter', sans-serif",
                   fontSize: '14px',
-                  color: 'rgba(10,12,18,0.50)',
+                  color: `${TEXT}80`,
                   lineHeight: 1.65,
                   margin: '0 0 18px',
                 }}
@@ -255,7 +256,7 @@ export function TrustSection() {
                     fontFamily: "'Space Grotesk', sans-serif",
                     fontSize: '22px',
                     fontWeight: 700,
-                    color: '#0A0C12',
+                    color: TEXT,
                     letterSpacing: '-0.3px',
                   }}
                 >
@@ -265,7 +266,7 @@ export function TrustSection() {
                   style={{
                     fontFamily: "'Inter', sans-serif",
                     fontSize: '12px',
-                    color: 'rgba(10,12,18,0.4)',
+                    color: `${TEXT}66`,
                     fontWeight: 400,
                   }}
                 >
@@ -290,38 +291,38 @@ export function TrustSection() {
             style={{
               fontFamily: "'Inter', sans-serif",
               fontSize: '15px',
-              color: 'rgba(10,12,18,0.5)',
+              color: `${TEXT}80`,
               marginBottom: '20px',
             }}
           >
-            Join <span style={{ fontWeight: 600, color: '#0A0C12' }}>12,000+</span> users who
-            already mint now and settle later.
+            Join <span style={{ fontWeight: 600, color: TEXT }}>12,000+</span> users who
+            already Buy now and settle later.
           </p>
           <button
             style={{
-              background: '#D7E377',
+              background: PRIMARY,
               border: 'none',
               cursor: 'pointer',
               fontFamily: "'Inter', sans-serif",
               fontSize: '15px',
               fontWeight: 600,
-              color: '#0A0C12',
+              color: TEXT,
               padding: '14px 32px',
               borderRadius: '12px',
-              boxShadow: '0 4px 20px rgba(107,122,0,0.25)',
+              boxShadow: `0 4px 20px ${SUCCESS}40`,
               transition: 'all 0.22s',
             }}
             onMouseEnter={(e) => {
               const b = e.currentTarget as HTMLButtonElement;
               b.style.background = '#e4ee8c';
               b.style.transform = 'translateY(-2px)';
-              b.style.boxShadow = '0 8px 28px rgba(107,122,0,0.32)';
+              b.style.boxShadow = `0 8px 28px ${SUCCESS}52`;
             }}
             onMouseLeave={(e) => {
               const b = e.currentTarget as HTMLButtonElement;
-              b.style.background = '#D7E377';
+              b.style.background = PRIMARY;
               b.style.transform = 'translateY(0)';
-              b.style.boxShadow = '0 4px 20px rgba(107,122,0,0.25)';
+              b.style.boxShadow = `0 4px 20px ${SUCCESS}40`;
             }}
           >
             Start for free — no card needed

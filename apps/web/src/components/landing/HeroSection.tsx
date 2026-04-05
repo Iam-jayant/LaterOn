@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { DashboardCard } from './DashboardCard';
+import { PRIMARY } from '@/lib/colors';
 
 const USE_CASES = ['Electronics', 'Furniture', 'Travel', 'Education', 'Fashion', 'Gadgets'];
 
@@ -240,7 +241,7 @@ export function HeroSection() {
               letterSpacing: '-1.8px',
             }}
           >
-            Mint Now.
+            Buy Now.
           </h1>
           <h1
             style={{
@@ -331,7 +332,7 @@ export function HeroSection() {
               <button
                 className="hero-cta-button"
                 style={{
-                  background: '#D7E377',
+                  background: PRIMARY,
                   border: 'none',
                   cursor: 'pointer',
                   fontFamily: "'Inter', sans-serif",
@@ -356,7 +357,7 @@ export function HeroSection() {
                 }}
                 onMouseLeave={(e) => {
                   const b = e.currentTarget as HTMLButtonElement;
-                  b.style.background = '#D7E377';
+                  b.style.background = PRIMARY;
                   b.style.transform = 'translateY(0)';
                   b.style.boxShadow = '0 4px 20px rgba(107,122,0,0.25)';
                 }}

@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { TEXT } from '@/lib/colors';
 
 export function Footer() {
   const productLinks = [
@@ -30,7 +31,7 @@ export function Footer() {
     <footer
       style={{
         background: 'rgba(245, 246, 240, 0.5)',
-        borderTop: '1px solid rgba(10, 12, 18, 0.08)',
+        borderTop: `1px solid ${TEXT}14`,
         marginTop: '80px',
       }}
     >
@@ -52,7 +53,7 @@ export function Footer() {
                 fontFamily: "'Space Grotesk', sans-serif",
                 fontSize: '20px',
                 fontWeight: 600,
-                color: '#0A0C12',
+                color: TEXT,
                 marginBottom: '12px',
               }}
             >
@@ -63,7 +64,7 @@ export function Footer() {
                 fontFamily: "'Inter', sans-serif",
                 fontSize: '14px',
                 lineHeight: '1.6',
-                color: 'rgba(10, 12, 18, 0.55)',
+                color: `${TEXT}8C`,
                 margin: 0,
               }}
             >
@@ -78,7 +79,7 @@ export function Footer() {
                 fontFamily: "'Inter', sans-serif",
                 fontSize: '13px',
                 fontWeight: 600,
-                color: '#0A0C12',
+                color: TEXT,
                 marginBottom: '16px',
                 marginTop: 0,
                 letterSpacing: '0.02em',
@@ -95,12 +96,12 @@ export function Footer() {
                     style={{
                       fontFamily: "'Inter', sans-serif",
                       fontSize: '14px',
-                      color: 'rgba(10, 12, 18, 0.55)',
+                      color: `${TEXT}8C`,
                       textDecoration: 'none',
                       transition: 'color 0.2s',
                     }}
-                    onMouseEnter={(e) => (e.currentTarget.style.color = '#0A0C12')}
-                    onMouseLeave={(e) => (e.currentTarget.style.color = 'rgba(10, 12, 18, 0.55)')}
+                    onMouseEnter={(e) => (e.currentTarget.style.color = TEXT)}
+                    onMouseLeave={(e) => (e.currentTarget.style.color = `${TEXT}8C`)}
                   >
                     {link.label}
                   </Link>
@@ -116,7 +117,7 @@ export function Footer() {
                 fontFamily: "'Inter', sans-serif",
                 fontSize: '13px',
                 fontWeight: 600,
-                color: '#0A0C12',
+                color: TEXT,
                 marginBottom: '16px',
                 marginTop: 0,
                 letterSpacing: '0.02em',
@@ -133,12 +134,12 @@ export function Footer() {
                     style={{
                       fontFamily: "'Inter', sans-serif",
                       fontSize: '14px',
-                      color: 'rgba(10, 12, 18, 0.55)',
+                      color: `${TEXT}8C`,
                       textDecoration: 'none',
                       transition: 'color 0.2s',
                     }}
-                    onMouseEnter={(e) => (e.currentTarget.style.color = '#0A0C12')}
-                    onMouseLeave={(e) => (e.currentTarget.style.color = 'rgba(10, 12, 18, 0.55)')}
+                    onMouseEnter={(e) => (e.currentTarget.style.color = TEXT)}
+                    onMouseLeave={(e) => (e.currentTarget.style.color = `${TEXT}8C`)}
                   >
                     {link.label}
                   </Link>
@@ -154,7 +155,7 @@ export function Footer() {
                 fontFamily: "'Inter', sans-serif",
                 fontSize: '13px',
                 fontWeight: 600,
-                color: '#0A0C12',
+                color: TEXT,
                 marginBottom: '16px',
                 marginTop: 0,
                 letterSpacing: '0.02em',
@@ -171,12 +172,12 @@ export function Footer() {
                     style={{
                       fontFamily: "'Inter', sans-serif",
                       fontSize: '14px',
-                      color: 'rgba(10, 12, 18, 0.55)',
+                      color: `${TEXT}8C`,
                       textDecoration: 'none',
                       transition: 'color 0.2s',
                     }}
-                    onMouseEnter={(e) => (e.currentTarget.style.color = '#0A0C12')}
-                    onMouseLeave={(e) => (e.currentTarget.style.color = 'rgba(10, 12, 18, 0.55)')}
+                    onMouseEnter={(e) => (e.currentTarget.style.color = TEXT)}
+                    onMouseLeave={(e) => (e.currentTarget.style.color = `${TEXT}8C`)}
                   >
                     {link.label}
                   </Link>
@@ -190,7 +191,7 @@ export function Footer() {
         <div
           style={{
             paddingTop: '24px',
-            borderTop: '1px solid rgba(10, 12, 18, 0.08)',
+            borderTop: `1px solid ${TEXT}14`,
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
@@ -203,7 +204,7 @@ export function Footer() {
             style={{
               fontFamily: "'Inter', sans-serif",
               fontSize: '13px',
-              color: 'rgba(10, 12, 18, 0.45)',
+              color: `${TEXT}73`,
               margin: 0,
             }}
           >
@@ -218,12 +219,12 @@ export function Footer() {
                 style={{
                   fontFamily: "'Inter', sans-serif",
                   fontSize: '13px',
-                  color: 'rgba(10, 12, 18, 0.45)',
+                  color: `${TEXT}73`,
                   textDecoration: 'none',
                   transition: 'color 0.2s',
                 }}
-                onMouseEnter={(e) => (e.currentTarget.style.color = '#0A0C12')}
-                onMouseLeave={(e) => (e.currentTarget.style.color = 'rgba(10, 12, 18, 0.45)')}
+                onMouseEnter={(e) => (e.currentTarget.style.color = TEXT)}
+                onMouseLeave={(e) => (e.currentTarget.style.color = `${TEXT}73`)}
               >
                 {link.label}
               </Link>

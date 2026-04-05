@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { PRIMARY, BACKGROUND, TEXT, SUCCESS } from '@/lib/colors';
 
 const STEPS = [
   {
@@ -91,11 +92,11 @@ export function HowItWorks() {
               fontFamily: "'Inter', sans-serif",
               fontSize: '12px',
               fontWeight: 600,
-              color: '#5a6900',
+              color: SUCCESS,
               letterSpacing: '0.1em',
               textTransform: 'uppercase',
-              background: 'rgba(107,122,0,0.08)',
-              border: '1px solid rgba(107,122,0,0.16)',
+              background: `${SUCCESS}14`,
+              border: `1px solid ${SUCCESS}29`,
               padding: '5px 14px',
               borderRadius: '100px',
               display: 'inline-block',
@@ -109,7 +110,7 @@ export function HowItWorks() {
               fontFamily: "'Space Grotesk', sans-serif",
               fontWeight: 700,
               fontSize: 'clamp(28px, 3.5vw, 40px)',
-              color: '#0A0C12',
+              color: TEXT,
               letterSpacing: '-0.8px',
               margin: '0 0 12px',
             }}
@@ -120,7 +121,7 @@ export function HowItWorks() {
             style={{
               fontFamily: "'Inter', sans-serif",
               fontSize: '16px',
-              color: 'rgba(10,12,18,0.48)',
+              color: `${TEXT}7A`,
               maxWidth: '420px',
               margin: '0 auto',
               lineHeight: 1.6,
@@ -186,7 +187,7 @@ export function HowItWorks() {
                     position: 'absolute',
                     top: '-14px',
                     left: '28px',
-                    background: '#D7E377',
+                    background: PRIMARY,
                     borderRadius: '8px',
                     padding: '3px 10px',
                   }}
@@ -196,7 +197,7 @@ export function HowItWorks() {
                       fontFamily: "'Space Grotesk', sans-serif",
                       fontSize: '11px',
                       fontWeight: 700,
-                      color: '#0A0C12',
+                      color: TEXT,
                       letterSpacing: '0.05em',
                     }}
                   >
@@ -210,8 +211,8 @@ export function HowItWorks() {
                     width: '56px',
                     height: '56px',
                     borderRadius: '16px',
-                    background: 'rgba(107,122,0,0.09)',
-                    border: '1px solid rgba(107,122,0,0.15)',
+                    background: `${SUCCESS}17`,
+                    border: `1px solid ${SUCCESS}26`,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -227,7 +228,7 @@ export function HowItWorks() {
                     fontFamily: "'Space Grotesk', sans-serif",
                     fontWeight: 700,
                     fontSize: '18px',
-                    color: '#0A0C12',
+                    color: TEXT,
                     margin: '0 0 10px',
                     letterSpacing: '-0.2px',
                   }}
@@ -238,7 +239,7 @@ export function HowItWorks() {
                   style={{
                     fontFamily: "'Inter', sans-serif",
                     fontSize: '14px',
-                    color: 'rgba(10,12,18,0.52)',
+                    color: `${TEXT}85`,
                     lineHeight: 1.65,
                     margin: '0 0 18px',
                   }}
@@ -252,8 +253,8 @@ export function HowItWorks() {
                     display: 'inline-flex',
                     alignItems: 'center',
                     gap: '6px',
-                    background: 'rgba(107,122,0,0.08)',
-                    border: '1px solid rgba(107,122,0,0.15)',
+                    background: `${SUCCESS}14`,
+                    border: `1px solid ${SUCCESS}26`,
                     borderRadius: '100px',
                     padding: '4px 12px',
                   }}
@@ -263,7 +264,7 @@ export function HowItWorks() {
                       width: '6px',
                       height: '6px',
                       borderRadius: '50%',
-                      background: '#D7E377',
+                      background: PRIMARY,
                     }}
                   />
                   <span
@@ -271,7 +272,7 @@ export function HowItWorks() {
                       fontFamily: "'Inter', sans-serif",
                       fontSize: '12px',
                       fontWeight: 600,
-                      color: '#5a6900',
+                      color: SUCCESS,
                     }}
                   >
                     {step.highlight}

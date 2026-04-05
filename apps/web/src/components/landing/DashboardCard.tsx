@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { PRIMARY, TEXT, SUCCESS, BACKGROUND } from '@/lib/colors';
 
 interface DashboardCardProps {
   title?: string;
@@ -21,7 +22,7 @@ function CircleProgress({ percent }: { percent: number }) {
         cy="36"
         r={r}
         fill="none"
-        stroke="#D7E377"
+        stroke={PRIMARY}
         strokeWidth="5"
         strokeDasharray={circ}
         strokeDashoffset={offset}
@@ -89,7 +90,7 @@ export function DashboardCard({
         style={{
           position: 'absolute',
           inset: '-24px',
-          background: 'radial-gradient(ellipse at center, rgba(107,122,0,0.10) 0%, transparent 70%)',
+          background: `radial-gradient(ellipse at center, ${SUCCESS}1A 0%, transparent 70%)`,
           borderRadius: '40px',
           pointerEvents: 'none',
         }}
@@ -128,7 +129,7 @@ export function DashboardCard({
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
             <path
               d="M2 8l4 4 8-8"
-              stroke="#5a6900"
+              stroke={SUCCESS}
               strokeWidth="2"
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -168,8 +169,8 @@ export function DashboardCard({
           background: '#FFFFFF',
           borderRadius: '24px',
           padding: '28px',
-          boxShadow: '0 20px 60px rgba(10,12,18,0.10), 0 1px 0 rgba(10,12,18,0.04)',
-          border: '1px solid rgba(10,12,18,0.06)',
+          boxShadow: `0 20px 60px ${TEXT}1A, 0 1px 0 ${TEXT}0A`,
+          border: `1px solid ${TEXT}0F`,
           position: 'relative',
           overflow: 'hidden',
         }}
@@ -182,7 +183,7 @@ export function DashboardCard({
             left: '28px',
             right: '28px',
             height: '2px',
-            background: 'linear-gradient(90deg, transparent, #D7E377, transparent)',
+            background: `linear-gradient(90deg, transparent, ${PRIMARY}, transparent)`,
             opacity: 0.7,
           }}
         />
@@ -235,8 +236,8 @@ export function DashboardCard({
           </div>
           <div
             style={{
-              background: 'rgba(107,122,0,0.10)',
-              border: '1px solid rgba(107,122,0,0.2)',
+              background: `${SUCCESS}1A`,
+              border: `1px solid ${SUCCESS}33`,
               borderRadius: '10px',
               padding: '6px 12px',
             }}
@@ -246,7 +247,7 @@ export function DashboardCard({
                 fontFamily: "'Inter', sans-serif",
                 fontSize: '12px',
                 fontWeight: 600,
-                color: '#5a6900',
+                color: SUCCESS,
                 margin: 0,
                 textTransform: 'capitalize',
               }}
@@ -259,7 +260,7 @@ export function DashboardCard({
         {/* Pay Now Highlight */}
         <div
           style={{
-            background: '#0A0C12',
+            background: TEXT,
             borderRadius: '16px',
             padding: '18px 20px',
             marginBottom: '20px',
@@ -337,7 +338,7 @@ export function DashboardCard({
                 fontFamily: "'Space Grotesk', sans-serif",
                 fontSize: '12px',
                 fontWeight: 600,
-                color: '#0A0C12',
+                color: TEXT,
               }}
             >
               33%
@@ -355,10 +356,10 @@ export function DashboardCard({
               style={{
                 width: `${progress}%`,
                 height: '100%',
-                background: 'linear-gradient(90deg, #b8cc4a, #D7E377)',
+                background: `linear-gradient(90deg, #b8cc4a, ${PRIMARY})`,
                 borderRadius: '100px',
                 transition: 'width 1s ease',
-                boxShadow: '0 0 8px rgba(107,122,0,0.3)',
+                boxShadow: `0 0 8px ${SUCCESS}4D`,
               }}
             />
           </div>
@@ -375,8 +376,8 @@ export function DashboardCard({
               key={label}
               style={{
                 flex: 1,
-                background: '#F5F6F0',
-                border: '1px solid rgba(10,12,18,0.06)',
+                background: BACKGROUND,
+                border: `1px solid ${TEXT}0F`,
                 borderRadius: '12px',
                 padding: '12px 14px',
               }}
@@ -385,7 +386,7 @@ export function DashboardCard({
                 style={{
                   fontFamily: "'Inter', sans-serif",
                   fontSize: '10px',
-                  color: 'rgba(10,12,18,0.4)',
+                  color: `${TEXT}66`,
                   margin: 0,
                   letterSpacing: '0.05em',
                   textTransform: 'uppercase',
@@ -398,7 +399,7 @@ export function DashboardCard({
                   fontFamily: "'Space Grotesk', sans-serif",
                   fontSize: '16px',
                   fontWeight: 700,
-                  color: '#0A0C12',
+                  color: TEXT,
                   margin: '4px 0 0',
                 }}
               >
@@ -417,10 +418,10 @@ export function DashboardCard({
           left: '24px',
           zIndex: 10,
           background: '#FFFFFF',
-          border: '1px solid rgba(10,12,18,0.08)',
+          border: `1px solid ${TEXT}14`,
           borderRadius: '12px',
           padding: '10px 16px',
-          boxShadow: '0 8px 24px rgba(10,12,18,0.10)',
+          boxShadow: `0 8px 24px ${TEXT}1A`,
           display: 'flex',
           alignItems: 'center',
           gap: '8px',
@@ -431,8 +432,8 @@ export function DashboardCard({
             width: '8px',
             height: '8px',
             borderRadius: '50%',
-            background: '#D7E377',
-            boxShadow: '0 0 6px rgba(107,122,0,0.6)',
+            background: PRIMARY,
+            boxShadow: `0 0 6px ${SUCCESS}99`,
             animation: 'pulse 2s infinite',
             flexShrink: 0,
           }}
@@ -441,7 +442,7 @@ export function DashboardCard({
           style={{
             fontFamily: "'Inter', sans-serif",
             fontSize: '12px',
-            color: 'rgba(10,12,18,0.55)',
+            color: `${TEXT}8C`,
             margin: 0,
           }}
         >

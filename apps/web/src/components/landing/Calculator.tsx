@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { PRIMARY, BACKGROUND, TEXT, SUCCESS } from '@/lib/colors';
 
 const PLANS = [3, 6, 12] as const;
 
@@ -50,11 +51,11 @@ export function Calculator() {
               fontFamily: "'Inter', sans-serif",
               fontSize: '12px',
               fontWeight: 600,
-              color: '#5a6900',
+              color: SUCCESS,
               letterSpacing: '0.1em',
               textTransform: 'uppercase',
-              background: 'rgba(107,122,0,0.08)',
-              border: '1px solid rgba(107,122,0,0.16)',
+              background: `${SUCCESS}14`,
+              border: `1px solid ${SUCCESS}29`,
               padding: '5px 14px',
               borderRadius: '100px',
               display: 'inline-block',
@@ -68,7 +69,7 @@ export function Calculator() {
               fontFamily: "'Space Grotesk', sans-serif",
               fontWeight: 700,
               fontSize: 'clamp(28px, 3.5vw, 40px)',
-              color: '#0A0C12',
+              color: TEXT,
               letterSpacing: '-0.8px',
               margin: '0 0 12px',
             }}
@@ -79,7 +80,7 @@ export function Calculator() {
             style={{
               fontFamily: "'Inter', sans-serif",
               fontSize: '16px',
-              color: 'rgba(10,12,18,0.48)',
+              color: `${TEXT}7A`,
               maxWidth: '420px',
               margin: '0 auto',
               lineHeight: 1.6,
@@ -92,8 +93,8 @@ export function Calculator() {
         {/* Calculator Card */}
         <div
           style={{
-            background: '#F5F6F0',
-            border: '1px solid rgba(10,12,18,0.07)',
+            background: BACKGROUND,
+            border: `1px solid ${TEXT}12`,
             borderRadius: '24px',
             padding: '48px',
             maxWidth: '900px',
@@ -118,7 +119,7 @@ export function Calculator() {
                     fontFamily: "'Inter', sans-serif",
                     fontSize: '14px',
                     fontWeight: 600,
-                    color: 'rgba(10,12,18,0.6)',
+                    color: `${TEXT}99`,
                     display: 'block',
                     marginBottom: '12px',
                   }}
@@ -130,7 +131,7 @@ export function Calculator() {
                     fontFamily: "'Space Grotesk', sans-serif",
                     fontSize: '36px',
                     fontWeight: 700,
-                    color: '#0A0C12',
+                    color: TEXT,
                     marginBottom: '16px',
                     letterSpacing: '-0.8px',
                   }}
@@ -149,7 +150,7 @@ export function Calculator() {
                     width: '100%',
                     height: '6px',
                     borderRadius: '3px',
-                    background: `linear-gradient(to right, #D7E377 0%, #D7E377 ${((amount - 1000) / (100000 - 1000)) * 100}%, rgba(10,12,18,0.1) ${((amount - 1000) / (100000 - 1000)) * 100}%, rgba(10,12,18,0.1) 100%)`,
+                    background: `linear-gradient(to right, ${PRIMARY} 0%, ${PRIMARY} ${((amount - 1000) / (100000 - 1000)) * 100}%, ${TEXT}1A ${((amount - 1000) / (100000 - 1000)) * 100}%, ${TEXT}1A 100%)`,
                     outline: 'none',
                     appearance: 'none',
                     WebkitAppearance: 'none',
@@ -167,7 +168,7 @@ export function Calculator() {
                     style={{
                       fontFamily: "'Inter', sans-serif",
                       fontSize: '12px',
-                      color: 'rgba(10,12,18,0.4)',
+                      color: `${TEXT}66`,
                     }}
                   >
                     ₹1,000
@@ -176,7 +177,7 @@ export function Calculator() {
                     style={{
                       fontFamily: "'Inter', sans-serif",
                       fontSize: '12px',
-                      color: 'rgba(10,12,18,0.4)',
+                      color: `${TEXT}66`,
                     }}
                   >
                     ₹1,00,000
@@ -191,7 +192,7 @@ export function Calculator() {
                     fontFamily: "'Inter', sans-serif",
                     fontSize: '14px',
                     fontWeight: 600,
-                    color: 'rgba(10,12,18,0.6)',
+                    color: `${TEXT}99`,
                     display: 'block',
                     marginBottom: '12px',
                   }}
@@ -206,8 +207,8 @@ export function Calculator() {
                       aria-label={`Select ${p} month plan`}
                       style={{
                         flex: 1,
-                        background: plan === p ? '#D7E377' : '#FFFFFF',
-                        border: plan === p ? '2px solid #6b7a00' : '1px solid rgba(10,12,18,0.12)',
+                        background: plan === p ? PRIMARY : '#FFFFFF',
+                        border: plan === p ? `2px solid ${SUCCESS}` : `1px solid ${TEXT}1F`,
                         borderRadius: '12px',
                         padding: '16px',
                         cursor: 'pointer',
@@ -223,14 +224,14 @@ export function Calculator() {
                       onMouseEnter={(e) => {
                         if (plan !== p) {
                           const btn = e.currentTarget as HTMLButtonElement;
-                          btn.style.borderColor = 'rgba(107,122,0,0.3)';
-                          btn.style.background = 'rgba(107,122,0,0.04)';
+                          btn.style.borderColor = `${SUCCESS}4D`;
+                          btn.style.background = `${SUCCESS}0A`;
                         }
                       }}
                       onMouseLeave={(e) => {
                         if (plan !== p) {
                           const btn = e.currentTarget as HTMLButtonElement;
-                          btn.style.borderColor = 'rgba(10,12,18,0.12)';
+                          btn.style.borderColor = `${TEXT}1F`;
                           btn.style.background = '#FFFFFF';
                         }
                       }}
@@ -239,7 +240,7 @@ export function Calculator() {
                         style={{
                           fontWeight: 700,
                           fontSize: '20px',
-                          color: plan === p ? '#0A0C12' : 'rgba(10,12,18,0.7)',
+                          color: plan === p ? TEXT : `${TEXT}B3`,
                           marginBottom: '4px',
                         }}
                       >
@@ -248,7 +249,7 @@ export function Calculator() {
                       <div
                         style={{
                           fontSize: '12px',
-                          color: plan === p ? 'rgba(10,12,18,0.6)' : 'rgba(10,12,18,0.45)',
+                          color: plan === p ? `${TEXT}99` : `${TEXT}73`,
                         }}
                       >
                         months
@@ -263,7 +264,7 @@ export function Calculator() {
             <div
               style={{
                 width: '1px',
-                background: 'rgba(10,12,18,0.1)',
+                background: `${TEXT}1A`,
                 alignSelf: 'stretch',
               }}
               className="calculator-divider"
@@ -276,7 +277,7 @@ export function Calculator() {
                   fontFamily: "'Inter', sans-serif",
                   fontSize: '14px',
                   fontWeight: 600,
-                  color: 'rgba(10,12,18,0.6)',
+                  color: `${TEXT}99`,
                   marginBottom: '20px',
                 }}
               >
@@ -291,7 +292,7 @@ export function Calculator() {
                     style={{
                       fontFamily: "'Inter', sans-serif",
                       fontSize: '13px',
-                      color: 'rgba(10,12,18,0.5)',
+                      color: `${TEXT}80`,
                       marginBottom: '6px',
                     }}
                   >
@@ -302,7 +303,7 @@ export function Calculator() {
                       fontFamily: "'Space Grotesk', sans-serif",
                       fontSize: '24px',
                       fontWeight: 700,
-                      color: '#0A0C12',
+                      color: TEXT,
                       letterSpacing: '-0.5px',
                     }}
                   >
@@ -314,7 +315,7 @@ export function Calculator() {
                 <div
                   style={{
                     background: '#FFFFFF',
-                    border: '2px solid #D7E377',
+                    border: `2px solid ${PRIMARY}`,
                     borderRadius: '16px',
                     padding: '20px',
                   }}
@@ -323,7 +324,7 @@ export function Calculator() {
                     style={{
                       fontFamily: "'Inter', sans-serif",
                       fontSize: '13px',
-                      color: 'rgba(10,12,18,0.5)',
+                      color: `${TEXT}80`,
                       marginBottom: '6px',
                     }}
                   >
@@ -334,7 +335,7 @@ export function Calculator() {
                       fontFamily: "'Space Grotesk', sans-serif",
                       fontSize: '32px',
                       fontWeight: 700,
-                      color: '#6b7a00',
+                      color: SUCCESS,
                       letterSpacing: '-0.8px',
                     }}
                   >
@@ -344,7 +345,7 @@ export function Calculator() {
                     style={{
                       fontFamily: "'Inter', sans-serif",
                       fontSize: '12px',
-                      color: 'rgba(10,12,18,0.4)',
+                      color: `${TEXT}66`,
                       marginTop: '4px',
                     }}
                   >
@@ -355,18 +356,18 @@ export function Calculator() {
                 {/* Total Saved */}
                 <div
                   style={{
-                    background: 'rgba(107,122,0,0.06)',
-                    border: '1px solid rgba(107,122,0,0.12)',
+                    background: `${SUCCESS}0F`,
+                    border: `1px solid ${SUCCESS}1F`,
                     borderRadius: '12px',
                     padding: '16px',
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                      <circle cx="8" cy="8" r="7" stroke="#6b7a00" strokeWidth="1.5" />
+                      <circle cx="8" cy="8" r="7" stroke={SUCCESS} strokeWidth="1.5" />
                       <path
                         d="M5 8l2.5 2.5L11 6"
-                        stroke="#6b7a00"
+                        stroke={SUCCESS}
                         strokeWidth="1.5"
                         strokeLinecap="round"
                         strokeLinejoin="round"
@@ -376,7 +377,7 @@ export function Calculator() {
                       style={{
                         fontFamily: "'Inter', sans-serif",
                         fontSize: '13px',
-                        color: '#5a6900',
+                        color: SUCCESS,
                         fontWeight: 600,
                       }}
                     >
@@ -387,7 +388,7 @@ export function Calculator() {
                     style={{
                       fontFamily: "'Inter', sans-serif",
                       fontSize: '11px',
-                      color: 'rgba(10,12,18,0.4)',
+                      color: `${TEXT}66`,
                       marginTop: '6px',
                     }}
                   >
@@ -407,32 +408,32 @@ export function Calculator() {
           width: 20px;
           height: 20px;
           border-radius: 50%;
-          background: #6b7a00;
+          background: ${SUCCESS};
           cursor: pointer;
           border: 3px solid #FFFFFF;
-          box-shadow: 0 2px 8px rgba(107, 122, 0, 0.3);
+          box-shadow: 0 2px 8px ${SUCCESS}4D;
           transition: all 0.2s ease;
         }
 
         input[type='range']::-webkit-slider-thumb:hover {
           transform: scale(1.15);
-          box-shadow: 0 4px 12px rgba(107, 122, 0, 0.4);
+          box-shadow: 0 4px 12px ${SUCCESS}66;
         }
 
         input[type='range']::-moz-range-thumb {
           width: 20px;
           height: 20px;
           border-radius: 50%;
-          background: #6b7a00;
+          background: ${SUCCESS};
           cursor: pointer;
           border: 3px solid #FFFFFF;
-          box-shadow: 0 2px 8px rgba(107, 122, 0, 0.3);
+          box-shadow: 0 2px 8px ${SUCCESS}4D;
           transition: all 0.2s ease;
         }
 
         input[type='range']::-moz-range-thumb:hover {
           transform: scale(1.15);
-          box-shadow: 0 4px 12px rgba(107, 122, 0, 0.4);
+          box-shadow: 0 4px 12px ${SUCCESS}66;
         }
 
         @media (max-width: 820px) {
