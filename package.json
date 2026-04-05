@@ -3,12 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "packageManager": "pnpm@10.15.0",
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=10.0.0"
+  },
   "scripts": {
     "dev:web": "pnpm --filter @lateron/web dev",
     "dev:admin": "pnpm --filter @lateron/admin dev",
     "dev:api": "pnpm --filter @lateron/api dev",
     "build": "pnpm -r build",
-    "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck"
   },
   "devDependencies": {

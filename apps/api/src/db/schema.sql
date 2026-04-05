@@ -8,9 +8,21 @@ CREATE TABLE IF NOT EXISTS users (
   completed_plans INT NOT NULL DEFAULT 0,
   defaults_count INT NOT NULL DEFAULT 0,
   total_outstanding_microalgo BIGINT NOT NULL DEFAULT 0,
+  later_on_score INT NOT NULL DEFAULT 500,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- Add later_on_score column to existing users table if it doesn't exist
+DO $$ 
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_name = 'users' AND column_name = 'later_on_score'
+  ) THEN
+    ALTER TABLE users ADD COLUMN later_on_score INT NOT NULL DEFAULT 500;
+  END IF;
+END $$;
 
 -- Index for fast wallet address lookups
 CREATE INDEX IF NOT EXISTS idx_users_wallet ON users(wallet_address);
@@ -53,3 +65,22 @@ CREATE INDEX IF NOT EXISTS idx_deposits_lender ON lender_deposits(lender_wallet_
 
 -- Index for transaction ID lookups (deduplication)
 CREATE INDEX IF NOT EXISTS idx_deposits_tx_id ON lender_deposits(tx_id);
+
+-- Gift cards table: stores gift card details for marketplace BNPL purchases
+CREATE TABLE IF NOT EXISTS gift_cards (
+  id SERIAL PRIMARY KEY,
+  plan_id TEXT NOT NULL UNIQUE,
+  reloadly_transaction_id BIGINT NOT NULL,
+  product_id INTEGER NOT NULL,
+  product_name VARCHAR(255) NOT NULL,
+  denomination INTEGER NOT NULL,
+  code VARCHAR(255) NOT NULL,
+  pin VARCHAR(255) NOT NULL,
+  purchased_at_unix BIGINT NOT NULL,
+  expires_at TIMESTAMP,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  CONSTRAINT fk_gift_card_plan FOREIGN KEY (plan_id) REFERENCES payment_plans(plan_id) ON DELETE CASCADE
+);
+
+-- Index for fast plan ID lookups
+CREATE INDEX IF NOT EXISTS idx_gift_cards_plan_id ON gift_cards(plan_id);
