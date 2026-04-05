@@ -1,10 +1,13 @@
-import type { FastifyInstance } from "fastify";
+import type { Hono } from "hono";
 import { z } from "zod";
 import { ValidationError } from "../errors.js";
 import { AtomicTxBuilder } from "../services/atomic-tx-builder.js";
 import { nowUnix } from "../lib/time.js";
 import { createId } from "../lib/ids.js";
 import type { PlanRecord } from "@lateron/sdk";
+import type { AppContext } from "../app-context.js";
+
+type HonoApp = Hono<{ Variables: { ctx: AppContext } }>;
 
 // Temporary in-memory storage for pending checkouts
 // In production, use Redis or similar distributed cache
@@ -89,45 +92,47 @@ const confirmSchema = z.object({
   txId: z.string().min(8),
 });
 
-export const registerCheckoutRoutes = (app: FastifyInstance): void => {
+export const registerCheckoutRoutes = (app: HonoApp): void => {
   /**
    * POST /api/checkout/quote
    * Generate quote using existing QuoteService
    */
-  app.post("/api/checkout/quote", async (request, reply) => {
-    const payload = quoteSchema.safeParse(request.body);
+  app.post("/api/checkout/quote", async (c) => {
+    const body = await c.req.json();
+    const payload = quoteSchema.safeParse(body);
     if (!payload.success) {
       throw new ValidationError("Invalid quote request", payload.error.flatten());
     }
 
-    const quote = app.ctx.quoteService.createQuote({
+    const quote = c.var.ctx.quoteService.createQuote({
       walletAddress: payload.data.walletAddress,
       merchantId: payload.data.merchantId,
       orderAmountInr: payload.data.orderAmountInr,
       tenureMonths: payload.data.tenureMonths,
     });
 
-    return reply.status(200).send(quote);
+    return c.json(quote, 200);
   });
 
   /**
    * POST /api/checkout/commit
    * Build unsigned transaction group using AtomicTxBuilder
    */
-  app.post("/api/checkout/commit", async (request, reply) => {
-    const payload = commitSchema.safeParse(request.body);
+  app.post("/api/checkout/commit", async (c) => {
+    const body = await c.req.json();
+    const payload = commitSchema.safeParse(body);
     if (!payload.success) {
       throw new ValidationError("Invalid commit request", payload.error.flatten());
     }
 
     // Get quote and validate expiration (Requirement 3.12)
-    const quote = app.ctx.gateway.getQuote(payload.data.quoteId);
+    const quote = c.var.ctx.gateway.getQuote(payload.data.quoteId);
     if (quote.expiresAtUnix < nowUnix()) {
       throw new ValidationError("Quote has expired");
     }
 
     // Get or create user to determine tier
-    const user = await app.ctx.gateway.getOrCreateUser(quote.walletAddress);
+    const user = await c.var.ctx.gateway.getOrCreateUser(quote.walletAddress);
     
     // Map tier to numeric value for contract
     const tierMap: Record<string, number> = {
@@ -145,7 +150,7 @@ export const registerCheckoutRoutes = (app: FastifyInstance): void => {
     const nextDueUnix = nowUnix() + 30 * 24 * 60 * 60;
 
     // Build atomic transaction group
-    const txBuilder = new AtomicTxBuilder(app.ctx.config);
+    const txBuilder = new AtomicTxBuilder(c.var.ctx.config);
     const txGroup = await txBuilder.buildCheckoutGroup({
       borrowerAddress: quote.walletAddress,
       merchantAddress: quote.merchantId, // Using merchantId as address for MVP
@@ -166,19 +171,20 @@ export const registerCheckoutRoutes = (app: FastifyInstance): void => {
       createdAtUnix: nowUnix(),
     });
 
-    return reply.status(200).send({
+    return c.json({
       unsignedTxns,
       planId,
       quote,
-    });
+    }, 200);
   });
 
   /**
    * POST /api/checkout/confirm
    * Save plan to PostgreSQL after on-chain confirmation
    */
-  app.post("/api/checkout/confirm", async (request, reply) => {
-    const payload = confirmSchema.safeParse(request.body);
+  app.post("/api/checkout/confirm", async (c) => {
+    const body = await c.req.json();
+    const payload = confirmSchema.safeParse(body);
     if (!payload.success) {
       throw new ValidationError("Invalid confirm request", payload.error.flatten());
     }
@@ -190,8 +196,8 @@ export const registerCheckoutRoutes = (app: FastifyInstance): void => {
     }
 
     // Get quote to reconstruct plan details
-    const quote = app.ctx.gateway.getQuote(pending.quoteId);
-    const user = await app.ctx.gateway.getOrCreateUser(quote.walletAddress);
+    const quote = c.var.ctx.gateway.getQuote(pending.quoteId);
+    const user = await c.var.ctx.gateway.getOrCreateUser(quote.walletAddress);
 
     // Calculate next due date (30 days from now for first installment)
     const createdAtUnix = nowUnix();
@@ -234,24 +240,24 @@ export const registerCheckoutRoutes = (app: FastifyInstance): void => {
     };
 
     // Save plan to PostgreSQL (Requirement 3.10)
-    await app.ctx.repository.savePlan(plan);
+    await c.var.ctx.repository.savePlan(plan);
 
     // Update liquidity state
-    app.ctx.gateway.getLiquidityState().availableAlgo -= quote.financedAmountAlgo;
-    app.ctx.gateway.getLiquidityState().totalLentAlgo += quote.financedAmountAlgo;
+    c.var.ctx.gateway.getLiquidityState().availableAlgo -= quote.financedAmountAlgo;
+    c.var.ctx.gateway.getLiquidityState().totalLentAlgo += quote.financedAmountAlgo;
 
     // Clean up pending checkout
     pendingCheckouts.delete(payload.data.planId);
 
     // Delete consumed quote
-    const store = app.ctx.gateway["store"] as any;
+    const store = c.var.ctx.gateway["store"] as any;
     if (store?.quotes) {
       store.quotes.delete(pending.quoteId);
     }
 
-    return reply.status(200).send({
+    return c.json({
       success: true,
       plan,
-    });
+    }, 200);
   });
 };

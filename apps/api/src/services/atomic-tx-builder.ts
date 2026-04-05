@@ -17,6 +17,17 @@ export interface RepaymentTxParams {
   repaymentAmountMicroAlgo: number;
 }
 
+export interface MarketplaceGroupParams {
+  borrowerAddress: string;
+  lendingPoolAddress: string;
+  merchantAddress: string;
+  firstInstallmentMicroAlgo: number;
+  totalAmountMicroAlgo: number;
+  nextDueUnix: number;
+  tierAtApproval: number;
+  planId: number;
+}
+
 /**
  * AtomicTxBuilder constructs unsigned Algorand transactions for checkout and repayment flows.
  * 
@@ -96,6 +107,74 @@ export class AtomicTxBuilder {
 
     // Assign group ID to ensure atomic execution
     const txGroup = [paymentTx, lendOutTx, createPlanTx];
+    algosdk.assignGroupID(txGroup);
+
+    return txGroup;
+  }
+
+  /**
+   * Builds an atomic transaction group for marketplace gift card purchases.
+   * 
+   * The group contains 3 transactions that must execute together:
+   * - Tx 0: Payment from borrower to lending pool (first installment)
+   * - Tx 1: Payment from lending pool to merchant (gift card purchase amount)
+   * - Tx 2: BNPL create_plan call (creates payment plan with box storage)
+   * 
+   * Before building, validates that the lending pool has sufficient balance.
+   * 
+   * @param params Marketplace checkout parameters including addresses, amounts, and plan details
+   * @returns Array of 3 unsigned transactions ready for signing
+   * @throws Error if lending pool balance is insufficient
+   */
+  async buildMarketplaceGroup(params: MarketplaceGroupParams): Promise<algosdk.Transaction[]> {
+    // Validate lending pool balance before building transaction
+    const poolAccountInfo = await this.algod.accountInformation(params.lendingPoolAddress).do();
+    const poolBalance = Number(poolAccountInfo.amount);
+    
+    if (poolBalance < params.totalAmountMicroAlgo) {
+      throw new Error("Insufficient pool liquidity");
+    }
+
+    const suggestedParams = await this.algod.getTransactionParams().do();
+
+    // Tx 0: Payment from borrower to lending pool (first installment)
+    const userPaymentTx = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
+      sender: params.borrowerAddress,
+      receiver: params.lendingPoolAddress,
+      amount: params.firstInstallmentMicroAlgo,
+      suggestedParams,
+    });
+
+    // Tx 1: Payment from lending pool to merchant (gift card purchase amount)
+    const poolDisbursementTx = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
+      sender: params.lendingPoolAddress,
+      receiver: params.merchantAddress,
+      amount: params.totalAmountMicroAlgo,
+      suggestedParams,
+    });
+
+    // Tx 2: BNPL create_plan call with box storage references
+    const createPlanTx = algosdk.makeApplicationNoOpTxnFromObject({
+      sender: params.borrowerAddress,
+      appIndex: this.bnplAppId,
+      appArgs: [
+        new Uint8Array(Buffer.from("create_plan")),
+        algosdk.decodeAddress(params.borrowerAddress).publicKey,
+        algosdk.encodeUint64(params.totalAmountMicroAlgo - params.firstInstallmentMicroAlgo),
+        algosdk.encodeUint64(params.firstInstallmentMicroAlgo),
+        algosdk.decodeAddress(params.merchantAddress).publicKey,
+        algosdk.encodeUint64(params.nextDueUnix),
+        new Uint8Array([params.tierAtApproval]),
+      ],
+      suggestedParams,
+      boxes: [
+        { appIndex: this.bnplAppId, name: this.getPlanBoxName(params.planId) },
+        { appIndex: this.bnplAppId, name: this.getUserBoxName(params.borrowerAddress) },
+      ],
+    });
+
+    // Assign group ID to ensure atomic execution
+    const txGroup = [userPaymentTx, poolDisbursementTx, createPlanTx];
     algosdk.assignGroupID(txGroup);
 
     return txGroup;

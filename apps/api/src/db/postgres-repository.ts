@@ -20,6 +20,7 @@ export class PostgresRepository {
         completed_plans INT NOT NULL DEFAULT 0,
         defaults_count INT NOT NULL DEFAULT 0,
         total_outstanding_microalgo BIGINT NOT NULL DEFAULT 0,
+        later_on_score INT NOT NULL DEFAULT 500,
         created_at TIMESTAMPTZ DEFAULT now(),
         updated_at TIMESTAMPTZ DEFAULT now()
       );
@@ -64,14 +65,39 @@ export class PostgresRepository {
    */
   async getOrCreateUser(walletAddress: string): Promise<UserProfile> {
     const result = await this.pool.query(
-      `INSERT INTO users (wallet_address, tier) 
-       VALUES ($1, 'NEW')
+      `INSERT INTO users (wallet_address, tier, later_on_score) 
+       VALUES ($1, 'NEW', 500)
        ON CONFLICT (wallet_address) 
        DO UPDATE SET updated_at = now()
        RETURNING *`,
       [walletAddress]
     );
     return this.mapUser(result.rows[0]);
+  }
+
+  /**
+   * Update user profile in the database.
+   * Updates tier, completed plans, defaults, and LaterOn Score.
+   */
+  async updateUser(profile: UserProfile): Promise<void> {
+    await this.pool.query(
+      `UPDATE users 
+       SET tier = $2, 
+           completed_plans = $3, 
+           defaults_count = $4, 
+           total_outstanding_microalgo = $5,
+           later_on_score = $6,
+           updated_at = now()
+       WHERE wallet_address = $1`,
+      [
+        profile.walletAddress,
+        profile.tier,
+        profile.completedPlans,
+        profile.defaults,
+        Math.round(profile.activeOutstandingInr * 1_000_000),
+        profile.laterOnScore
+      ]
+    );
   }
 
   /**
@@ -182,6 +208,7 @@ export class PostgresRepository {
       defaults: row.defaults_count,
       latePayments: 0, // Not tracked in MVP schema
       activeOutstandingInr: row.total_outstanding_microalgo / 1_000_000,
+      laterOnScore: row.later_on_score ?? 500,
     };
   }
 
@@ -240,5 +267,82 @@ export class PostgresRepository {
   async healthCheck(): Promise<boolean> {
     await this.pool.query("SELECT 1");
     return true;
+  }
+
+  /**
+   * Insert a gift card record associated with a BNPL plan.
+   */
+  async insertGiftCard(giftCard: {
+    planId: string;
+    reloadlyTransactionId: number;
+    productId: number;
+    productName: string;
+    denomination: number;
+    code: string;
+    pin: string;
+    purchasedAtUnix: number;
+    expiresAt: string | null;
+  }): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO gift_cards (
+        plan_id,
+        reloadly_transaction_id,
+        product_id,
+        product_name,
+        denomination,
+        code,
+        pin,
+        purchased_at_unix,
+        expires_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [
+        giftCard.planId,
+        giftCard.reloadlyTransactionId,
+        giftCard.productId,
+        giftCard.productName,
+        giftCard.denomination,
+        giftCard.code,
+        giftCard.pin,
+        giftCard.purchasedAtUnix,
+        giftCard.expiresAt
+      ]
+    );
+  }
+
+  /**
+   * Get gift card details by plan ID.
+   */
+  async getGiftCardByPlanId(planId: string): Promise<{
+    planId: string;
+    reloadlyTransactionId: number;
+    productId: number;
+    productName: string;
+    denomination: number;
+    code: string;
+    pin: string;
+    purchasedAtUnix: number;
+    expiresAt: string | null;
+  } | null> {
+    const result = await this.pool.query(
+      `SELECT * FROM gift_cards WHERE plan_id = $1`,
+      [planId]
+    );
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    const row = result.rows[0];
+    return {
+      planId: row.plan_id,
+      reloadlyTransactionId: row.reloadly_transaction_id,
+      productId: row.product_id,
+      productName: row.product_name,
+      denomination: row.denomination,
+      code: row.code,
+      pin: row.pin,
+      purchasedAtUnix: row.purchased_at_unix,
+      expiresAt: row.expires_at
+    };
   }
 }

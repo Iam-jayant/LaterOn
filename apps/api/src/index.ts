@@ -1,3 +1,4 @@
+import { serve } from "@hono/node-server";
 import { createAppContext } from "./app-context";
 import { loadConfig } from "./config";
 import { logger } from "./lib/logger";
@@ -25,14 +26,21 @@ const bootstrap = async (): Promise<void> => {
   }
 
   const ctx = await createAppContext(config);
-  const app = await buildServer(ctx);
+  const app = buildServer(ctx);
+
+  // Start server
+  const server = serve({
+    fetch: app.fetch,
+    port: config.apiPort,
+    hostname: "0.0.0.0"
+  });
 
   // Graceful shutdown handler
   const gracefulShutdown = async (signal: string): Promise<void> => {
     logger.info(`Received ${signal}, starting graceful shutdown`);
     
     try {
-      await app.close();
+      server.close();
       logger.info("Server closed successfully");
       process.exit(0);
     } catch (error) {
@@ -44,16 +52,7 @@ const bootstrap = async (): Promise<void> => {
   process.on("SIGTERM", () => void gracefulShutdown("SIGTERM"));
   process.on("SIGINT", () => void gracefulShutdown("SIGINT"));
 
-  try {
-    await app.listen({
-      host: "0.0.0.0",
-      port: config.apiPort
-    });
-    logger.info(`API server started on port ${config.apiPort}`);
-  } catch (error) {
-    logger.error("Failed to start API server", { error });
-    process.exit(1);
-  }
+  logger.info(`API server started on port ${config.apiPort}`);
 };
 
 void bootstrap();

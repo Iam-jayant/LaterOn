@@ -5,7 +5,11 @@ import {
   generateInstallmentDueDates,
   getDownPaymentRatioForTier,
   TIER_CAPS,
+  applyOnTimePaymentScoreIncrease,
+  applyCompletionBonus,
+  applyOverdueScoreDecrease,
   type CheckoutQuote,
+  type GiftCardMetadata,
   type LiquidityState,
   type PlanRecord,
   type UserProfile
@@ -42,7 +46,8 @@ export class ContractGateway {
       completedPlans: 0,
       defaults: 0,
       latePayments: 0,
-      activeOutstandingInr: 0
+      activeOutstandingInr: 0,
+      laterOnScore: 500
     };
     this.store.users.set(walletAddress, created);
     return created;
@@ -301,11 +306,24 @@ export class ContractGateway {
     plan.nextDueAtUnix = plan.installments[plan.installmentsPaid]?.dueAtUnix ?? nowUnix();
 
     const user = await this.getOrCreateUser(plan.walletAddress);
+    
+    // Check if payment is on-time (before or on due date)
+    const isOnTime = nowUnix() <= plan.nextDueAtUnix;
+    
+    // Apply on-time payment score increase (Requirement 10.1)
+    let updatedUser = user;
+    if (isOnTime) {
+      updatedUser = applyOnTimePaymentScoreIncrease(updatedUser);
+    }
+    
     if (plan.remainingAmountAlgo === 0) {
       plan.status = "COMPLETED";
-      user.completedPlans += 1;
-      user.activeOutstandingInr = Math.max(0, user.activeOutstandingInr - plan.financedAmountInr);
-      user.tier = determineTier(user);
+      updatedUser.completedPlans += 1;
+      updatedUser.activeOutstandingInr = Math.max(0, updatedUser.activeOutstandingInr - plan.financedAmountInr);
+      updatedUser.tier = determineTier(updatedUser);
+      
+      // Apply completion bonus (Requirement 10.3)
+      updatedUser = applyCompletionBonus(updatedUser);
     } else if (plan.status === "LATE") {
       plan.status = "ACTIVE";
     }
@@ -318,11 +336,12 @@ export class ContractGateway {
         status: plan.status,
         nextDueAtUnix: plan.nextDueAtUnix
       });
+      await this.repository.updateUser(updatedUser);
     } else {
       this.store.plans.set(plan.planId, plan);
     }
 
-    this.store.users.set(user.walletAddress, user);
+    this.store.users.set(updatedUser.walletAddress, updatedUser);
 
     this.emit("installment.paid", {
       planId: plan.planId,
@@ -360,12 +379,19 @@ export class ContractGateway {
     plan.status = transition.nextStatus;
 
     const user = await this.getOrCreateUser(plan.walletAddress);
-    const updatedProfile = applyRiskOutcomeToProfile(user, previousStatus, transition.nextStatus, atUnix);
+    let updatedProfile = applyRiskOutcomeToProfile(user, previousStatus, transition.nextStatus, atUnix);
+    
+    // Apply score decrease for overdue installments (Requirement 10.7)
+    if (transition.isLateTransition || transition.isDefaultTransition) {
+      updatedProfile = applyOverdueScoreDecrease(updatedProfile);
+    }
+    
     this.store.users.set(user.walletAddress, updatedProfile);
 
     // Update plan in PostgresRepository if available
     if (this.repository) {
       await this.repository.updatePlan(planId, { status: plan.status });
+      await this.repository.updateUser(updatedProfile);
     } else {
       this.store.plans.set(planId, plan);
     }
@@ -410,6 +436,77 @@ export class ContractGateway {
 
   public listEvents(fromIdExclusive = 0): ContractEvent[] {
     return this.store.events.filter((event) => event.id > fromIdExclusive);
+  }
+
+  /**
+   * Create a BNPL plan for a gift card purchase with gift card metadata.
+   * This method extends createPlanFromQuote to include gift card details in the plan state.
+   * 
+   * @param quoteId - Quote ID from marketplace quote
+   * @param giftCardMetadata - Gift card details (product info, code, PIN)
+   * @returns Created plan record with gift card metadata
+   */
+  public async createGiftCardPlan(
+    quoteId: string,
+    giftCardMetadata: GiftCardMetadata
+  ): Promise<PlanRecord> {
+    // Create the base plan using existing logic
+    const plan = await this.createPlanFromQuote(quoteId);
+
+    // Attach gift card metadata to the plan
+    plan.giftCardDetails = giftCardMetadata;
+
+    // Update plan in PostgresRepository if available
+    if (this.repository) {
+      await this.repository.updatePlan(plan.planId, {
+        giftCardDetails: giftCardMetadata
+      });
+    } else {
+      this.store.plans.set(plan.planId, plan);
+    }
+
+    this.emit("giftcard.attached", {
+      planId: plan.planId,
+      productId: giftCardMetadata.productId,
+      productName: giftCardMetadata.productName,
+      reloadlyTransactionId: giftCardMetadata.reloadlyTransactionId
+    });
+
+    return plan;
+  }
+
+  /**
+   * Attach gift card metadata to an existing plan.
+   * Used when gift card fulfillment happens after plan creation.
+   * 
+   * @param planId - Plan ID to attach gift card to
+   * @param giftCardMetadata - Gift card details (product info, code, PIN)
+   */
+  public async attachGiftCardToPlan(
+    planId: string,
+    giftCardMetadata: GiftCardMetadata
+  ): Promise<void> {
+    // Get plan using the getPlan method
+    const plan = await this.getPlan(planId);
+
+    // Attach gift card metadata
+    plan.giftCardDetails = giftCardMetadata;
+
+    // Update plan in PostgresRepository if available
+    if (this.repository) {
+      await this.repository.updatePlan(planId, {
+        giftCardDetails: giftCardMetadata
+      });
+    } else {
+      this.store.plans.set(planId, plan);
+    }
+
+    this.emit("giftcard.attached", {
+      planId,
+      productId: giftCardMetadata.productId,
+      productName: giftCardMetadata.productName,
+      reloadlyTransactionId: giftCardMetadata.reloadlyTransactionId
+    });
   }
 
   private emit(type: string, payload: unknown): void {

@@ -1,6 +1,6 @@
-import cors from "@fastify/cors";
+import { cors } from "hono/cors";
+import { Hono } from "hono";
 import { USER_SAFE_ERROR_MESSAGE, type ProtocolAprTable } from "@lateron/sdk";
-import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { AppContext } from "./app-context";
 import {
@@ -18,53 +18,56 @@ import { registerCheckoutRoutes } from "./routes/checkout.js";
 import { registerRepaymentRoutes } from "./routes/repayment.js";
 import { registerLenderRoutes } from "./routes/lender.js";
 import { registerAdminRoutes } from "./routes/admin.js";
+import { registerMarketplaceRoutes } from "./routes/marketplace.js";
 
-const adminGuard = (app: FastifyInstance, key: string): void => {
-  app.addHook("onRequest", async (request) => {
-    if (!request.url.startsWith("/v1/admin")) {
-      return;
+// Extend Hono context with AppContext
+type HonoApp = Hono<{ Variables: { ctx: AppContext } }>;
+
+const adminGuard = (app: HonoApp, key: string): void => {
+  app.use("*", async (c, next) => {
+    if (!c.req.path.startsWith("/v1/admin")) {
+      return next();
     }
-    const incoming = request.headers["x-admin-key"];
+    const incoming = c.req.header("x-admin-key");
     if (incoming !== key) {
       throw new UnauthorizedError();
     }
+    return next();
   });
 };
 
-const rateLimitGuard = (app: FastifyInstance): void => {
-  app.addHook("onRequest", async (request) => {
-    if (request.url.startsWith("/health")) {
-      return;
+const rateLimitGuard = (app: HonoApp): void => {
+  app.use("*", async (c, next) => {
+    if (c.req.path.startsWith("/health")) {
+      return next();
     }
 
-    const identity = `${request.ip}:${request.method}:${request.url.split("?")[0]}`;
-    app.ctx.rateLimitService.checkOrThrow(identity, app.ctx.config.rateLimitPerMinute);
+    const identity = `${c.req.header("x-forwarded-for") ?? "unknown"}:${c.req.method}:${c.req.path.split("?")[0]}`;
+    c.var.ctx.rateLimitService.checkOrThrow(identity, c.var.ctx.config.rateLimitPerMinute);
+    return next();
   });
 };
 
-const normalizeHeader = (value: string | string[] | undefined): string | undefined => {
-  if (!value) {
-    return undefined;
-  }
-  return Array.isArray(value) ? value[0] : value;
+const normalizeHeader = (value: string | undefined): string | undefined => {
+  return value;
 };
 
-const resolveWalletFromAuth = (app: FastifyInstance, request: FastifyRequest): string | undefined => {
-  if (!app.ctx.config.authRequired) {
+const resolveWalletFromAuth = (c: any): string | undefined => {
+  if (!c.var.ctx.config.authRequired) {
     return undefined;
   }
 
-  const authHeader = normalizeHeader(request.headers.authorization);
+  const authHeader = normalizeHeader(c.req.header("authorization"));
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     throw new UnauthorizedError("Missing Bearer token");
   }
 
   const token = authHeader.slice("Bearer ".length).trim();
-  return app.ctx.authService.verifyToken(token, app.ctx.config.authTokenSecret).walletAddress;
+  return c.var.ctx.authService.verifyToken(token, c.var.ctx.config.authTokenSecret).walletAddress;
 };
 
-const assertWalletMatch = (app: FastifyInstance, authenticatedWallet: string | undefined, targetWallet: string): void => {
-  if (!app.ctx.config.authRequired) {
+const assertWalletMatch = (c: any, authenticatedWallet: string | undefined, targetWallet: string): void => {
+  if (!c.var.ctx.config.authRequired) {
     return;
   }
   if (!authenticatedWallet || authenticatedWallet !== targetWallet) {
@@ -73,41 +76,38 @@ const assertWalletMatch = (app: FastifyInstance, authenticatedWallet: string | u
 };
 
 const assertMerchantAccess = (
-  app: FastifyInstance,
-  request: FastifyRequest,
+  c: any,
   merchantId: string
 ): void => {
-  if (!app.ctx.config.merchantAuthRequired) {
+  if (!c.var.ctx.config.merchantAuthRequired) {
     return;
   }
 
-  const incoming = normalizeHeader(request.headers["x-merchant-key"]);
+  const incoming = normalizeHeader(c.req.header("x-merchant-key"));
   if (!incoming) {
     throw new UnauthorizedError("Merchant API key is required");
   }
 
-  const expected = app.ctx.config.merchantApiKeys[merchantId];
+  const expected = c.var.ctx.config.merchantApiKeys[merchantId];
   if (!expected || incoming !== expected) {
     throw new UnauthorizedError("Invalid merchant API key");
   }
 };
 
 const maybeReplayIdempotentResponse = (
-  app: FastifyInstance,
-  request: FastifyRequest,
-  reply: FastifyReply,
+  c: any,
   scope: string,
   identity: string
-): { handled: true } | { handled: false; key?: string } => {
-  if (!app.ctx.config.requireIdempotency) {
+): { handled: true; response: Response } | { handled: false; key?: string } => {
+  if (!c.var.ctx.config.requireIdempotency) {
     return {
       handled: false
     };
   }
 
-  const incoming = normalizeHeader(request.headers["x-idempotency-key"]);
+  const incoming = normalizeHeader(c.req.header("x-idempotency-key"));
   const storageKey = `${scope}:${identity}:${incoming ?? ""}`;
-  const cached = app.ctx.idempotencyService.getOrThrow(storageKey);
+  const cached = c.var.ctx.idempotencyService.getOrThrow(storageKey);
   if (!cached) {
     return {
       handled: false,
@@ -115,14 +115,14 @@ const maybeReplayIdempotentResponse = (
     };
   }
 
-  void reply.status(cached.statusCode).send(cached.body);
   return {
-    handled: true
+    handled: true,
+    response: c.json(cached.body, cached.statusCode)
   };
 };
 
 const maybeSaveIdempotentResponse = (
-  app: FastifyInstance,
+  c: any,
   idempotencyKey: string | undefined,
   statusCode: number,
   body: unknown
@@ -130,13 +130,13 @@ const maybeSaveIdempotentResponse = (
   if (!idempotencyKey) {
     return;
   }
-  app.ctx.idempotencyService.save(idempotencyKey, {
+  c.var.ctx.idempotencyService.save(idempotencyKey, {
     statusCode,
     body
   });
 };
 
-const createRoutes = (app: FastifyInstance): void => {
+const createRoutes = (app: HonoApp): void => {
   // Register checkout routes
   registerCheckoutRoutes(app);
 
@@ -149,55 +149,61 @@ const createRoutes = (app: FastifyInstance): void => {
   // Register admin routes
   registerAdminRoutes(app);
 
-  app.post("/v1/auth/challenge", async (request) => {
+  // Register marketplace routes
+  registerMarketplaceRoutes(app);
+
+  app.post("/v1/auth/challenge", async (c) => {
+    const body = await c.req.json();
     const payload = z
       .object({
         walletAddress: z.string().min(8)
       })
-      .safeParse(request.body);
+      .safeParse(body);
     if (!payload.success) {
       throw new ValidationError("Invalid auth challenge request", payload.error.flatten());
     }
 
-    const challenge = app.ctx.authService.createChallenge(
+    const challenge = c.var.ctx.authService.createChallenge(
       payload.data.walletAddress,
-      app.ctx.config.authChallengeTtlSeconds
+      c.var.ctx.config.authChallengeTtlSeconds
     );
-    return {
+    return c.json({
       challengeId: challenge.challengeId,
       walletAddress: challenge.walletAddress,
       message: challenge.message,
       expiresAtUnix: challenge.expiresAtUnix
-    };
+    });
   });
 
-  app.post("/v1/auth/verify", async (request) => {
+  app.post("/v1/auth/verify", async (c) => {
+    const body = await c.req.json();
     const payload = z
       .object({
         walletAddress: z.string().min(8),
         challengeId: z.string().min(10),
         signature: z.string().min(6)
       })
-      .safeParse(request.body);
+      .safeParse(body);
     if (!payload.success) {
       throw new ValidationError("Invalid auth verify request", payload.error.flatten());
     }
 
-    const token = app.ctx.authService.verifyChallengeAndIssueToken({
+    const token = c.var.ctx.authService.verifyChallengeAndIssueToken({
       walletAddress: payload.data.walletAddress,
       challengeId: payload.data.challengeId,
       signature: payload.data.signature,
-      secret: app.ctx.config.authTokenSecret,
-      tokenTtlSeconds: app.ctx.config.authTokenTtlSeconds,
-      allowDevBypass: app.ctx.config.devSignatureBypass
+      secret: c.var.ctx.config.authTokenSecret,
+      tokenTtlSeconds: c.var.ctx.config.authTokenTtlSeconds,
+      allowDevBypass: c.var.ctx.config.devSignatureBypass
     });
-    return {
+    return c.json({
       walletAddress: payload.data.walletAddress,
       ...token
-    };
+    });
   });
 
-  app.post("/v1/quotes", async (request) => {
+  app.post("/v1/quotes", async (c) => {
+    const body = await c.req.json();
     const payload = z
       .object({
         walletAddress: z.string().min(8),
@@ -205,169 +211,170 @@ const createRoutes = (app: FastifyInstance): void => {
         orderAmountInr: z.number().positive(),
         tenureMonths: z.number().int().positive().max(24)
       })
-      .safeParse(request.body);
+      .safeParse(body);
     if (!payload.success) {
       throw new ValidationError("Invalid quote request", payload.error.flatten());
     }
 
-    const walletFromToken = resolveWalletFromAuth(app, request);
-    assertWalletMatch(app, walletFromToken, payload.data.walletAddress);
-    assertMerchantAccess(app, request, payload.data.merchantId);
+    const walletFromToken = resolveWalletFromAuth(c);
+    assertWalletMatch(c, walletFromToken, payload.data.walletAddress);
+    assertMerchantAccess(c, payload.data.merchantId);
 
-    return app.ctx.quoteService.createQuote(payload.data);
+    return c.json(c.var.ctx.quoteService.createQuote(payload.data));
   });
 
-  app.post("/v1/checkout/commit", async (request, reply) => {
+  app.post("/v1/checkout/commit", async (c) => {
+    const body = await c.req.json();
     const payload = z
       .object({
         quoteId: z.string().min(10)
       })
-      .safeParse(request.body);
+      .safeParse(body);
     if (!payload.success) {
       throw new ValidationError("Invalid checkout request", payload.error.flatten());
     }
 
-    const walletFromToken = resolveWalletFromAuth(app, request);
-    const merchantKey = normalizeHeader(request.headers["x-merchant-key"]) ?? "none";
+    const walletFromToken = resolveWalletFromAuth(c);
+    const merchantKey = normalizeHeader(c.req.header("x-merchant-key")) ?? "none";
 
     const idempotency = maybeReplayIdempotentResponse(
-      app,
-      request,
-      reply,
+      c,
       "checkout",
       `${walletFromToken ?? "anon"}:${payload.data.quoteId}:${merchantKey}`
     );
     if (idempotency.handled) {
-      return;
+      return idempotency.response;
     }
 
-    const quote = app.ctx.gateway.getQuote(payload.data.quoteId);
-    assertWalletMatch(app, walletFromToken, quote.walletAddress);
-    assertMerchantAccess(app, request, quote.merchantId);
+    const quote = c.var.ctx.gateway.getQuote(payload.data.quoteId);
+    assertWalletMatch(c, walletFromToken, quote.walletAddress);
+    assertMerchantAccess(c, quote.merchantId);
 
-    const plan = await app.ctx.gateway.createPlanFromQuote(payload.data.quoteId);
-    await app.ctx.readModel.sync();
+    const plan = await c.var.ctx.gateway.createPlanFromQuote(payload.data.quoteId);
+    await c.var.ctx.readModel.sync();
     const response = {
       success: true,
       plan
     };
-    maybeSaveIdempotentResponse(app, idempotency.key, 200, response);
-    return response;
+    maybeSaveIdempotentResponse(c, idempotency.key, 200, response);
+    return c.json(response);
   });
 
-  app.get("/v1/plans", async (request) => {
+  app.get("/v1/plans", async (c) => {
     const query = z
       .object({
         walletAddress: z.string().min(8)
       })
-      .safeParse(request.query);
+      .safeParse(Object.fromEntries(new URL(c.req.url).searchParams));
     if (!query.success) {
       throw new ValidationError("walletAddress query param is required");
     }
 
-    const walletFromToken = resolveWalletFromAuth(app, request);
-    assertWalletMatch(app, walletFromToken, query.data.walletAddress);
+    const walletFromToken = resolveWalletFromAuth(c);
+    assertWalletMatch(c, walletFromToken, query.data.walletAddress);
 
-    await app.ctx.readModel.sync();
-    return {
-      plans: app.ctx.readModel.getPlansByWallet(query.data.walletAddress),
-      user: app.ctx.readModel.getUser(query.data.walletAddress) ?? app.ctx.gateway.getOrCreateUser(query.data.walletAddress)
-    };
+    await c.var.ctx.readModel.sync();
+    return c.json({
+      plans: c.var.ctx.readModel.getPlansByWallet(query.data.walletAddress),
+      user: c.var.ctx.readModel.getUser(query.data.walletAddress) ?? c.var.ctx.gateway.getOrCreateUser(query.data.walletAddress)
+    });
   });
 
-  app.post("/v1/plans/:planId/repay", async (request, reply) => {
+  app.post("/v1/plans/:planId/repay", async (c) => {
     const params = z
       .object({
         planId: z.string().min(8)
       })
-      .safeParse(request.params);
+      .safeParse(c.req.param());
+    const body = await c.req.json();
     const payload = z
       .object({
         amountAlgo: z.number().positive()
       })
-      .safeParse(request.body);
+      .safeParse(body);
 
     if (!params.success || !payload.success) {
       throw new ValidationError("Invalid repayment payload");
     }
 
-    const existingPlan = await app.ctx.gateway.getPlan(params.data.planId);
-    const walletFromToken = resolveWalletFromAuth(app, request);
-    assertWalletMatch(app, walletFromToken, existingPlan.walletAddress);
+    const existingPlan = await c.var.ctx.gateway.getPlan(params.data.planId);
+    const walletFromToken = resolveWalletFromAuth(c);
+    assertWalletMatch(c, walletFromToken, existingPlan.walletAddress);
 
     const idempotency = maybeReplayIdempotentResponse(
-      app,
-      request,
-      reply,
+      c,
       "repay",
       existingPlan.walletAddress
     );
     if (idempotency.handled) {
-      return;
+      return idempotency.response;
     }
 
-    const plan = await app.ctx.gateway.repayInstallment(params.data.planId, payload.data.amountAlgo);
-    await app.ctx.readModel.sync();
+    const plan = await c.var.ctx.gateway.repayInstallment(params.data.planId, payload.data.amountAlgo);
+    await c.var.ctx.readModel.sync();
     const response = {
       success: true,
       plan
     };
-    maybeSaveIdempotentResponse(app, idempotency.key, 200, response);
-    return response;
+    maybeSaveIdempotentResponse(c, idempotency.key, 200, response);
+    return c.json(response);
   });
 
-  app.get("/v1/liquidity/state", async () => {
-    await app.ctx.readModel.sync();
-    return {
-      liquidity: app.ctx.readModel.getLiquidity()
-    };
+  app.get("/v1/liquidity/state", async (c) => {
+    await c.var.ctx.readModel.sync();
+    return c.json({
+      liquidity: c.var.ctx.readModel.getLiquidity()
+    });
   });
 
-  app.post("/v1/lender/deposit", async (request) => {
+  app.post("/v1/lender/deposit", async (c) => {
+    const body = await c.req.json();
     const payload = z
       .object({
         walletAddress: z.string().min(8),
         amountAlgo: z.number().positive()
       })
-      .safeParse(request.body);
+      .safeParse(body);
     if (!payload.success) {
       throw new ValidationError("Invalid deposit payload");
     }
 
-    const walletFromToken = resolveWalletFromAuth(app, request);
-    assertWalletMatch(app, walletFromToken, payload.data.walletAddress);
+    const walletFromToken = resolveWalletFromAuth(c);
+    assertWalletMatch(c, walletFromToken, payload.data.walletAddress);
 
-    const liquidity = await app.ctx.gateway.depositLiquidity(payload.data.walletAddress, payload.data.amountAlgo);
-    await app.ctx.readModel.sync();
-    return {
+    const liquidity = await c.var.ctx.gateway.depositLiquidity(payload.data.walletAddress, payload.data.amountAlgo);
+    await c.var.ctx.readModel.sync();
+    return c.json({
       success: true,
       liquidity
-    };
+    });
   });
 
-  app.post("/v1/lender/withdraw", async (request) => {
+  app.post("/v1/lender/withdraw", async (c) => {
+    const body = await c.req.json();
     const payload = z
       .object({
         walletAddress: z.string().min(8),
         amountAlgo: z.number().positive()
       })
-      .safeParse(request.body);
+      .safeParse(body);
     if (!payload.success) {
       throw new ValidationError("Invalid withdraw payload");
     }
 
-    const walletFromToken = resolveWalletFromAuth(app, request);
-    assertWalletMatch(app, walletFromToken, payload.data.walletAddress);
+    const walletFromToken = resolveWalletFromAuth(c);
+    assertWalletMatch(c, walletFromToken, payload.data.walletAddress);
 
-    const liquidity = await app.ctx.gateway.withdrawLiquidity(payload.data.walletAddress, payload.data.amountAlgo);
-    await app.ctx.readModel.sync();
-    return {
+    const liquidity = await c.var.ctx.gateway.withdrawLiquidity(payload.data.walletAddress, payload.data.amountAlgo);
+    await c.var.ctx.readModel.sync();
+    return c.json({
       success: true,
       liquidity
-    };
+    });
   });
 
-  app.post("/v1/admin/params", async (request) => {
+  app.post("/v1/admin/params", async (c) => {
+    const body = await c.req.json();
     const payload = z
       .object({
         reserveRatio: z.number().min(0).max(0.5).optional(),
@@ -380,111 +387,116 @@ const createRoutes = (app: FastifyInstance): void => {
           })
           .optional()
       })
-      .safeParse(request.body);
+      .safeParse(body);
     if (!payload.success) {
       throw new ValidationError("Invalid admin payload");
     }
 
     const next = payload.data as Partial<{ reserveRatio: number; paused: boolean; aprTable: ProtocolAprTable }>;
-    const params = app.ctx.gateway.updateProtocolParams(next);
-    await app.ctx.readModel.sync();
-    return {
+    const params = c.var.ctx.gateway.updateProtocolParams(next);
+    await c.var.ctx.readModel.sync();
+    return c.json({
       success: true,
       params
-    };
+    });
   });
 
-  app.post("/v1/admin/settle-risk/:planId", async (request) => {
+  app.post("/v1/admin/settle-risk/:planId", async (c) => {
     const params = z
       .object({
         planId: z.string().min(8)
       })
-      .safeParse(request.params);
+      .safeParse(c.req.param());
     if (!params.success) {
       throw new ValidationError("Invalid plan id");
     }
 
-    const plan = await app.ctx.gateway.settleRisk(params.data.planId);
-    await app.ctx.readModel.sync();
-    return {
+    const plan = await c.var.ctx.gateway.settleRisk(params.data.planId);
+    await c.var.ctx.readModel.sync();
+    return c.json({
       success: true,
       plan
-    };
+    });
   });
 
-  app.post("/v1/admin/keeper/run", async () => {
-    const output = await app.ctx.riskKeeper.runOnce();
-    return {
+  app.post("/v1/admin/keeper/run", async (c) => {
+    const output = await c.var.ctx.riskKeeper.runOnce();
+    return c.json({
       success: true,
       ...output
-    };
+    });
   });
 };
 
-export const buildServer = async (ctx: AppContext): Promise<FastifyInstance> => {
-  const app = Fastify({ logger: false }); // Disable default logger, use winston instead
-  app.decorate("ctx", ctx);
+export const buildServer = (ctx: AppContext): HonoApp => {
+  const app = new Hono<{ Variables: { ctx: AppContext } }>();
 
-  await app.register(cors, {
-    origin: (origin, callback) => {
+  // Set context in variables
+  app.use("*", async (c, next) => {
+    c.set("ctx", ctx);
+    return next();
+  });
+
+  // CORS middleware
+  app.use("*", cors({
+    origin: (origin) => {
       if (!origin) {
-        callback(null, true);
-        return;
+        return "*";
       }
 
       if (ctx.config.corsOrigins.includes("*") || ctx.config.corsOrigins.includes(origin)) {
-        callback(null, true);
-        return;
+        return origin;
       }
 
-      callback(new Error("Not allowed by CORS"), false);
+      return null;
     }
-  });
+  }));
+
   adminGuard(app, ctx.config.adminApiKey);
   rateLimitGuard(app);
   createRoutes(app);
 
   // Health check endpoint
-  app.get("/health", async () => {
+  app.get("/health", async (c) => {
     // Test database connection if available
     if (ctx.config.databaseUrl) {
       try {
         await ctx.readModel.sync();
-        return {
+        return c.json({
           status: "ok",
           database: "connected"
-        };
+        });
       } catch (error) {
         logger.error("Health check failed - database connection error", { error });
-        return {
+        return c.json({
           status: "degraded",
           database: "disconnected"
-        };
+        });
       }
     }
-    return {
+    return c.json({
       status: "ok",
       database: "not_configured"
-    };
+    });
   });
 
-  app.setErrorHandler((error, request, reply) => {
+  // Error handler
+  app.onError((error, c) => {
     // Handle insufficient liquidity errors (hide internal details)
     if (error instanceof InsufficientPoolLiquidityError) {
       logger.error("Liquidity shortfall during checkout commit", {
         code: error.code,
         detail: error.detail,
-        url: request.url,
-        method: request.method
+        url: c.req.url,
+        method: c.req.method
       });
-      void reply.status(500).send({
+      return c.json({
         error: {
           code: "INTERNAL_ERROR",
           message: USER_SAFE_ERROR_MESSAGE,
           details: null
         }
-      });
-      return;
+      }, 500);
     }
 
     // Handle all AppError subclasses (ValidationError, NotFoundError, BlockchainError, etc.)
@@ -493,33 +505,32 @@ export const buildServer = async (ctx: AppContext): Promise<FastifyInstance> => 
         code: error.code,
         statusCode: error.statusCode,
         detail: error.detail,
-        url: request.url,
-        method: request.method
+        url: c.req.url,
+        method: c.req.method
       });
-      void reply.status(error.statusCode).send({
+      return c.json({
         error: {
           code: error.code,
           message: error.message,
           details: error.detail ?? null
         }
-      });
-      return;
+      }, error.statusCode as any);
     }
 
     // Handle unexpected errors
     logger.error("Unhandled exception", {
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined,
-      url: request.url,
-      method: request.method
+      url: c.req.url,
+      method: c.req.method
     });
-    void reply.status(500).send({
+    return c.json({
       error: {
         code: "INTERNAL_ERROR",
         message: USER_SAFE_ERROR_MESSAGE,
         details: null
       }
-    });
+    }, 500);
   });
 
   return app;

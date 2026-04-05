@@ -11,6 +11,9 @@ import { RateLimitService } from "./services/rate-limit-service";
 import { ReadModelService } from "./services/read-model";
 import { RiskKeeperService } from "./services/risk-keeper";
 import { InMemoryStore } from "./services/store";
+import { ReloadlyService } from "./services/reloadly-service";
+import { CoinGeckoService } from "./services/coingecko-service";
+import { MarketplaceService } from "./services/marketplace-service";
 
 export interface AppContext {
   gateway: ContractGateway;
@@ -23,6 +26,9 @@ export interface AppContext {
   chainService: AlgorandAppService;
   mirror: PostgresMirror;
   repository: PostgresRepository;
+  reloadlyService: ReloadlyService;
+  coinGeckoService: CoinGeckoService;
+  marketplaceService: MarketplaceService;
   config: ApiConfig;
 }
 
@@ -49,6 +55,18 @@ export const createAppContext = async (config: Partial<ApiConfig>): Promise<AppC
   const authService = new AuthService(store);
   const idempotencyService = new IdempotencyService(store);
   const rateLimitService = new RateLimitService(store);
+  
+  // Initialize marketplace services
+  const reloadlyService = new ReloadlyService(resolvedConfig);
+  const coinGeckoService = new CoinGeckoService(resolvedConfig);
+  const marketplaceService = new MarketplaceService(
+    resolvedConfig,
+    reloadlyService,
+    coinGeckoService,
+    gateway,
+    repository
+  );
+  
   return {
     gateway,
     readModel,
@@ -60,6 +78,9 @@ export const createAppContext = async (config: Partial<ApiConfig>): Promise<AppC
     chainService,
     mirror,
     repository,
+    reloadlyService,
+    coinGeckoService,
+    marketplaceService,
     config: resolvedConfig
   };
 };

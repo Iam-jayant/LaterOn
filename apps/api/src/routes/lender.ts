@@ -1,7 +1,10 @@
-import type { FastifyInstance } from "fastify";
+import type { Hono } from "hono";
 import { z } from "zod";
 import { ValidationError } from "../errors.js";
 import algosdk from "algosdk";
+import type { AppContext } from "../app-context.js";
+
+type HonoApp = Hono<{ Variables: { ctx: AppContext } }>;
 
 /**
  * Lender API Routes
@@ -62,13 +65,14 @@ const confirmDepositSchema = z.object({
   txId: z.string().min(8),
 });
 
-export const registerLenderRoutes = (app: FastifyInstance): void => {
+export const registerLenderRoutes = (app: HonoApp): void => {
   /**
    * POST /api/lender/deposit/prepare
    * Build unsigned payment transaction to pool
    */
-  app.post("/api/lender/deposit/prepare", async (request, reply) => {
-    const payload = prepareDepositSchema.safeParse(request.body);
+  app.post("/api/lender/deposit/prepare", async (c) => {
+    const body = await c.req.json();
+    const payload = prepareDepositSchema.safeParse(body);
     if (!payload.success) {
       throw new ValidationError("Invalid deposit prepare request", payload.error.flatten());
     }
@@ -79,12 +83,12 @@ export const registerLenderRoutes = (app: FastifyInstance): void => {
     }
 
     // Get pool address from config
-    const poolAddress = algosdk.getApplicationAddress(app.ctx.config.poolAppId);
+    const poolAddress = algosdk.getApplicationAddress(c.var.ctx.config.poolAppId);
 
     // Get suggested transaction parameters
     const algod = new algosdk.Algodv2(
-      app.ctx.config.algodToken,
-      app.ctx.config.algodAddress,
+      c.var.ctx.config.algodToken,
+      c.var.ctx.config.algodAddress,
       ""
     );
     const suggestedParams = await algod.getTransactionParams().do();
@@ -100,25 +104,26 @@ export const registerLenderRoutes = (app: FastifyInstance): void => {
     // Encode transaction as base64 for frontend
     const unsignedTxn = Buffer.from(paymentTx.toByte()).toString("base64");
 
-    return reply.status(200).send({
+    return c.json({
       unsignedTxn,
       amountAlgo: payload.data.amountAlgo,
       poolAddress,
-    });
+    }, 200);
   });
 
   /**
    * POST /api/lender/deposit/confirm
    * Record deposit in lender_deposits table after on-chain confirmation
    */
-  app.post("/api/lender/deposit/confirm", async (request, reply) => {
-    const payload = confirmDepositSchema.safeParse(request.body);
+  app.post("/api/lender/deposit/confirm", async (c) => {
+    const body = await c.req.json();
+    const payload = confirmDepositSchema.safeParse(body);
     if (!payload.success) {
       throw new ValidationError("Invalid deposit confirm request", payload.error.flatten());
     }
 
     // Record deposit in lender_deposits table (Requirement 7.8)
-    await app.ctx.repository.saveDeposit(
+    await c.var.ctx.repository.saveDeposit(
       payload.data.lenderAddress,
       payload.data.amountAlgo,
       payload.data.txId
@@ -126,27 +131,27 @@ export const registerLenderRoutes = (app: FastifyInstance): void => {
 
     // Update pool statistics (Requirement 7.5)
     // Increment total_deposits and available_liquidity
-    const liquidityState = app.ctx.gateway.getLiquidityState();
+    const liquidityState = c.var.ctx.gateway.getLiquidityState();
     liquidityState.totalDepositsAlgo += payload.data.amountAlgo;
     liquidityState.availableAlgo += payload.data.amountAlgo;
 
-    return reply.status(200).send({
+    return c.json({
       success: true,
       deposit: {
         lenderAddress: payload.data.lenderAddress,
         amountAlgo: payload.data.amountAlgo,
         txId: payload.data.txId,
       },
-    });
+    }, 200);
   });
 
   /**
    * GET /api/lender/stats
    * Return pool statistics from PostgreSQL
    */
-  app.get("/api/lender/stats", async (request, reply) => {
+  app.get("/api/lender/stats", async (c) => {
     // Get pool statistics (Requirement 7.1)
-    const liquidityState = app.ctx.gateway.getLiquidityState();
+    const liquidityState = c.var.ctx.gateway.getLiquidityState();
 
     // Calculate statistics
     const stats = {
@@ -155,6 +160,6 @@ export const registerLenderRoutes = (app: FastifyInstance): void => {
       availableLiquidityAlgo: liquidityState.availableAlgo,
     };
 
-    return reply.status(200).send(stats);
+    return c.json(stats, 200);
   });
 };

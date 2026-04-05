@@ -22,6 +22,17 @@ export interface ApiConfig {
   poolAppId: number;
   relayerMnemonic?: string;
   relayerPrivateKey?: string;
+  reloadlyClientId: string;
+  reloadlyClientSecret: string;
+  reloadlyBaseUrl: string;
+  reloadlyAuthUrl: string;
+  reloadlyTokenCacheTtlSeconds: number;
+  coinGeckoBaseUrl: string;
+  coinGeckoRateCacheTtlSeconds: number;
+  coinGeckoFallbackRate: number;
+  lendingPoolAddress: string;
+  marketplaceMerchantId: string;
+  marketplaceTenureMonths: number;
 }
 
 const envNumber = (key: string, fallback: number): number => {
@@ -90,7 +101,18 @@ const rawEnvConfig = (): Partial<ApiConfig> => ({
   bnplAppId: envNumber("BNPL_APP_ID", 0),
   poolAppId: envNumber("POOL_APP_ID", 0),
   relayerMnemonic: process.env.RELAYER_MNEMONIC,
-  relayerPrivateKey: process.env.RELAYER_PRIVATE_KEY
+  relayerPrivateKey: process.env.RELAYER_PRIVATE_KEY,
+  reloadlyClientId: process.env.RELOADLY_CLIENT_ID ?? "",
+  reloadlyClientSecret: process.env.RELOADLY_CLIENT_SECRET ?? "",
+  reloadlyBaseUrl: process.env.RELOADLY_BASE_URL ?? "https://giftcards-sandbox.reloadly.com",
+  reloadlyAuthUrl: process.env.RELOADLY_AUTH_URL ?? "https://auth.reloadly.com",
+  reloadlyTokenCacheTtlSeconds: envNumber("RELOADLY_TOKEN_CACHE_TTL_SECONDS", 3600),
+  coinGeckoBaseUrl: process.env.COINGECKO_BASE_URL ?? "https://api.coingecko.com/api/v3",
+  coinGeckoRateCacheTtlSeconds: envNumber("COINGECKO_RATE_CACHE_TTL_SECONDS", 300),
+  coinGeckoFallbackRate: envNumber("COINGECKO_FALLBACK_RATE", 0.0022),
+  lendingPoolAddress: process.env.LENDING_POOL_ADDRESS ?? "",
+  marketplaceMerchantId: process.env.MARKETPLACE_MERCHANT_ID ?? "reloadly",
+  marketplaceTenureMonths: envNumber("MARKETPLACE_TENURE_MONTHS", 3)
 });
 
 const defaults: ApiConfig = {
@@ -116,7 +138,18 @@ const defaults: ApiConfig = {
   bnplAppId: 0,
   poolAppId: 0,
   relayerMnemonic: undefined,
-  relayerPrivateKey: undefined
+  relayerPrivateKey: undefined,
+  reloadlyClientId: "",
+  reloadlyClientSecret: "",
+  reloadlyBaseUrl: "https://giftcards-sandbox.reloadly.com",
+  reloadlyAuthUrl: "https://auth.reloadly.com",
+  reloadlyTokenCacheTtlSeconds: 3600,
+  coinGeckoBaseUrl: "https://api.coingecko.com/api/v3",
+  coinGeckoRateCacheTtlSeconds: 300,
+  coinGeckoFallbackRate: 0.0022,
+  lendingPoolAddress: "",
+  marketplaceMerchantId: "reloadly",
+  marketplaceTenureMonths: 3
 };
 
 export const resolveConfig = (partial: Partial<ApiConfig>): ApiConfig => ({

@@ -1,8 +1,11 @@
-import type { FastifyInstance } from "fastify";
+import type { Hono } from "hono";
 import { z } from "zod";
 import { ValidationError } from "../errors.js";
 import { AtomicTxBuilder } from "../services/atomic-tx-builder.js";
 import { nowUnix } from "../lib/time.js";
+import type { AppContext } from "../app-context.js";
+
+type HonoApp = Hono<{ Variables: { ctx: AppContext } }>;
 
 /**
  * Repayment API Routes
@@ -61,19 +64,20 @@ const confirmSchema = z.object({
   repaymentAmountAlgo: z.number().positive(),
 });
 
-export const registerRepaymentRoutes = (app: FastifyInstance): void => {
+export const registerRepaymentRoutes = (app: HonoApp): void => {
   /**
    * POST /api/repayment/prepare
    * Build unsigned repayment transaction using AtomicTxBuilder
    */
-  app.post("/api/repayment/prepare", async (request, reply) => {
-    const payload = prepareSchema.safeParse(request.body);
+  app.post("/api/repayment/prepare", async (c) => {
+    const body = await c.req.json();
+    const payload = prepareSchema.safeParse(body);
     if (!payload.success) {
       throw new ValidationError("Invalid repayment prepare request", payload.error.flatten());
     }
 
     // Get plan from PostgreSQL
-    const plan = await app.ctx.repository.getPlan(payload.data.planId);
+    const plan = await c.var.ctx.repository.getPlan(payload.data.planId);
     if (!plan) {
       throw new ValidationError("Plan not found");
     }
@@ -99,7 +103,7 @@ export const registerRepaymentRoutes = (app: FastifyInstance): void => {
     const planIdNumeric = parseInt(plan.planId.replace(/\D/g, "").slice(0, 8), 10) || Date.now();
 
     // Build repayment transaction
-    const txBuilder = new AtomicTxBuilder(app.ctx.config);
+    const txBuilder = new AtomicTxBuilder(c.var.ctx.config);
     const repaymentTx = await txBuilder.buildRepaymentTx({
       borrowerAddress: plan.walletAddress,
       planId: planIdNumeric,
@@ -109,25 +113,26 @@ export const registerRepaymentRoutes = (app: FastifyInstance): void => {
     // Encode transaction as base64 for frontend
     const unsignedTxn = Buffer.from(repaymentTx.toByte()).toString("base64");
 
-    return reply.status(200).send({
+    return c.json({
       unsignedTxn,
       plan,
       repaymentAmountAlgo,
-    });
+    }, 200);
   });
 
   /**
    * POST /api/repayment/confirm
    * Update plan in PostgreSQL after on-chain confirmation
    */
-  app.post("/api/repayment/confirm", async (request, reply) => {
-    const payload = confirmSchema.safeParse(request.body);
+  app.post("/api/repayment/confirm", async (c) => {
+    const body = await c.req.json();
+    const payload = confirmSchema.safeParse(body);
     if (!payload.success) {
       throw new ValidationError("Invalid repayment confirm request", payload.error.flatten());
     }
 
     // Get current plan from PostgreSQL
-    const plan = await app.ctx.repository.getPlan(payload.data.planId);
+    const plan = await c.var.ctx.repository.getPlan(payload.data.planId);
     if (!plan) {
       throw new ValidationError("Plan not found");
     }
@@ -147,7 +152,7 @@ export const registerRepaymentRoutes = (app: FastifyInstance): void => {
     const nextDueUnix = nowUnix() + 30 * 24 * 60 * 60;
 
     // Update plan in PostgreSQL (Requirement 4.7)
-    await app.ctx.repository.updatePlan(payload.data.planId, {
+    await c.var.ctx.repository.updatePlan(payload.data.planId, {
       remainingAmountAlgo: Math.max(0, newRemainingAmount),
       installmentsPaid: newInstallmentsPaid,
       status: newStatus,
@@ -156,22 +161,22 @@ export const registerRepaymentRoutes = (app: FastifyInstance): void => {
 
     // If plan is completed, update user's completed plans count
     if (newStatus === "COMPLETED" && plan.status !== "COMPLETED") {
-      const user = await app.ctx.repository.getOrCreateUser(plan.walletAddress);
+      const user = await c.var.ctx.repository.getOrCreateUser(plan.walletAddress);
       // Note: User completed_plans increment would require additional repository method
       // For MVP, this is handled by the gateway/read model
     }
 
     // Update liquidity state (return funds to pool)
-    const liquidityState = app.ctx.gateway.getLiquidityState();
+    const liquidityState = c.var.ctx.gateway.getLiquidityState();
     liquidityState.availableAlgo += payload.data.repaymentAmountAlgo;
     liquidityState.totalLentAlgo -= payload.data.repaymentAmountAlgo;
 
     // Get updated plan
-    const updatedPlan = await app.ctx.repository.getPlan(payload.data.planId);
+    const updatedPlan = await c.var.ctx.repository.getPlan(payload.data.planId);
 
-    return reply.status(200).send({
+    return c.json({
       success: true,
       plan: updatedPlan,
-    });
+    }, 200);
   });
 };

@@ -70,7 +70,7 @@ export class DatabaseMigrations {
    * Verify that all required tables exist
    */
   private async verifySchema(client: any): Promise<void> {
-    const requiredTables = ["users", "payment_plans", "lender_deposits"];
+    const requiredTables = ["users", "payment_plans", "lender_deposits", "gift_cards"];
     
     for (const tableName of requiredTables) {
       const result = await client.query(
