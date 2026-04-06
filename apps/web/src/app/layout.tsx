@@ -16,7 +16,7 @@ const spaceGrotesk = Space_Grotesk({
 
 export const metadata: Metadata = {
   title: "LaterOn",
-  description: "Mint now. Settle later."
+  description: "Buy now. Settle later."
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
