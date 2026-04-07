@@ -44,6 +44,7 @@ export default function MarketplacePage() {
   const [selectedDenomination, setSelectedDenomination] = useState<number | null>(null);
   const [isCheckoutModalOpen, setIsCheckoutModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [expandedProductId, setExpandedProductId] = useState<number | null>(null);
 
   // Fetch catalog on mount (Requirement 2.1)
   useEffect(() => {
@@ -99,13 +100,13 @@ export default function MarketplacePage() {
     }
   };
 
+  const handleCardExpand = (productId: number): void => {
+    setExpandedProductId(productId === expandedProductId ? null : productId);
+  };
+
   const handleCardClick = (product: GiftCardProduct, denomination: number): void => {
     setSelectedProduct(product);
     setSelectedDenomination(denomination);
-  };
-
-  const handlePayIn3 = (): void => {
-    if (!selectedProduct || !selectedDenomination) return;
     setIsCheckoutModalOpen(true);
   };
 
@@ -155,6 +156,8 @@ export default function MarketplacePage() {
           selectedProduct={selectedProduct}
           selectedDenomination={selectedDenomination}
           onCardSelect={handleCardClick}
+          expandedProductId={expandedProductId}
+          onCardClick={handleCardExpand}
         />
 
         {/* No Results Message - Requirement 13.4 */}
@@ -164,33 +167,6 @@ export default function MarketplacePage() {
           </p>
         )}
 
-        {/* Pay in 3 Button (Requirement 2.5, 5.1) */}
-        {selectedProduct && selectedDenomination && (
-          <div
-            style={{
-              marginTop: "24px",
-              padding: "20px",
-              border: "1px solid var(--border)",
-              borderRadius: "12px",
-              backgroundColor: "var(--muted)",
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center"
-            }}
-          >
-            <div>
-              <p style={{ margin: 0, fontWeight: 500 }}>
-                {selectedProduct.brandName} - ₹{selectedDenomination}
-              </p>
-              <p style={{ margin: "4px 0 0", fontSize: "14px", color: "var(--muted)" }}>
-                Pay in 3 monthly installments of ₹{Math.ceil(selectedDenomination / 3)}
-              </p>
-            </div>
-            <button type="button" onClick={handlePayIn3}>
-              Pay in 3
-            </button>
-          </div>
-        )}
       </section>
 
       {/* Checkout Modal (Requirement 5.2, 5.3, 5.7, 6.1, 6.5, 6.6, 7.3, 7.4) */}
