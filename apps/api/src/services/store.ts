@@ -55,10 +55,10 @@ export class InMemoryStore {
   };
 
   public liquidity: LiquidityState = {
-    totalDepositsAlgo: 0,
+    totalDepositsAlgo: 1000, // Initial test liquidity
     totalLentAlgo: 0,
     reserveAlgo: 0,
-    availableAlgo: 0
+    availableAlgo: 1000 // Initial test liquidity for marketplace testing
   };
 
   private eventId = 1;

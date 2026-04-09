@@ -37,18 +37,28 @@ export const createAppContext = async (config: Partial<ApiConfig>): Promise<AppC
   const store = new InMemoryStore();
   const chainService = new AlgorandAppService(resolvedConfig);
 
-  // Initialize PostgreSQL connection pool and repository
-  const pool = new Pool({
-    connectionString: resolvedConfig.databaseUrl,
-    min: 2,
-    max: 10,
-  });
-  const repository = new PostgresRepository(pool);
-  await repository.init();
+  // Initialize PostgreSQL connection pool and repository (optional)
+  let repository: PostgresRepository;
+  let mirror: PostgresMirror;
+  
+  if (resolvedConfig.databaseUrl) {
+    const pool = new Pool({
+      connectionString: resolvedConfig.databaseUrl,
+      min: 2,
+      max: 10,
+    });
+    repository = new PostgresRepository(pool);
+    await repository.init();
+    
+    mirror = new PostgresMirror(resolvedConfig.databaseUrl);
+    await mirror.init();
+  } else {
+    // Create stub implementations when database is not configured
+    repository = null as any; // Will be handled by services
+    mirror = null as any;
+  }
 
   const gateway = new ContractGateway(store, chainService, repository);
-  const mirror = new PostgresMirror(resolvedConfig.databaseUrl);
-  await mirror.init();
   const readModel = new ReadModelService(gateway, mirror);
   const quoteService = new QuoteService(gateway, resolvedConfig);
   const riskKeeper = new RiskKeeperService(gateway, readModel);

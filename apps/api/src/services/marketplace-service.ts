@@ -308,6 +308,131 @@ export class MarketplaceService {
   }
 
   /**
+   * Prepare marketplace checkout by building unsigned transactions.
+   * Returns base64-encoded unsigned transactions for frontend signing.
+   * 
+   * @param quoteId - Quote ID from createMarketplaceQuote
+   * @returns Array of base64-encoded unsigned transactions
+   */
+  public async prepareCheckout(quoteId: string): Promise<string[]> {
+    // Validate quote exists and not expired
+    const quote = this.contractGateway.getQuote(quoteId) as MarketplaceQuote;
+    if (!quote.productId) {
+      throw new ValidationError("Invalid quote: not a marketplace quote");
+    }
+
+    if (quote.expiresAtUnix < nowUnix()) {
+      throw new ValidationError("Quote expired");
+    }
+
+    logger.info("Preparing marketplace checkout", {
+      quoteId,
+      productId: quote.productId,
+      walletAddress: quote.walletAddress
+    });
+
+    // Build unsigned transactions
+    const unsignedTransactions = await this.contractGateway.buildUnsignedTransactionsFromQuote(quoteId);
+
+    logger.info("Unsigned transactions built successfully", {
+      quoteId,
+      transactionCount: unsignedTransactions.length
+    });
+
+    return unsignedTransactions;
+  }
+
+  /**
+   * Confirm marketplace checkout by submitting signed transactions and fulfilling gift card.
+   * 
+   * @param quoteId - Quote ID from createMarketplaceQuote
+   * @param signedTransactions - Array of base64-encoded signed transactions
+   * @returns Gift card details with code and PIN
+   */
+  public async confirmCheckout(
+    quoteId: string,
+    signedTransactions: string[]
+  ): Promise<GiftCardDetails> {
+    // Get quote
+    const quote = this.contractGateway.getQuote(quoteId) as MarketplaceQuote;
+    if (!quote.productId) {
+      throw new ValidationError("Invalid quote: not a marketplace quote");
+    }
+
+    // Validate quote not expired
+    if (quote.expiresAtUnix < nowUnix()) {
+      throw new ValidationError("Quote expired");
+    }
+
+    logger.info("Confirming marketplace checkout", {
+      quoteId,
+      productId: quote.productId,
+      transactionCount: signedTransactions.length
+    });
+
+    // Submit signed transactions and create plan
+    const plan = await this.contractGateway.createPlanFromSignedTransactions(
+      quoteId,
+      signedTransactions
+    );
+
+    logger.info("BNPL plan created for gift card purchase", {
+      planId: plan.planId,
+      quoteId,
+      productId: quote.productId
+    });
+
+    // Purchase gift card from Reloadly
+    try {
+      const fulfillment = await this.reloadlyService.purchaseGiftCard({
+        productId: quote.productId,
+        countryCode: "IN",
+        quantity: 1,
+        unitPrice: quote.denomination,
+        customIdentifier: plan.planId
+      });
+
+      // Create gift card details
+      const giftCardDetails: GiftCardDetails = {
+        planId: plan.planId,
+        reloadlyTransactionId: fulfillment.transactionId,
+        productId: quote.productId,
+        productName: quote.productName,
+        denomination: quote.denomination,
+        code: fulfillment.code,
+        pin: fulfillment.pin,
+        purchasedAtUnix: nowUnix(),
+        expiresAt: null // Reloadly doesn't provide expiration in sandbox
+      };
+
+      // Store gift card details in database
+      if (this.repository) {
+        await this.repository.insertGiftCard(giftCardDetails);
+      }
+
+      logger.info("Gift card purchased and stored successfully", {
+        planId: plan.planId,
+        reloadlyTransactionId: fulfillment.transactionId,
+        productName: quote.productName
+      });
+
+      return giftCardDetails;
+    } catch (error) {
+      // Fulfillment failed after plan creation - log error and throw
+      logger.error("Gift card fulfillment failed after plan creation", {
+        planId: plan.planId,
+        quoteId,
+        error
+      });
+
+      // TODO: Implement rollback/refund logic
+      throw new Error(
+        `Payment received but gift card delivery failed. Contact support with transaction ID: ${plan.planId}`
+      );
+    }
+  }
+
+  /**
    * Map Reloadly product to GiftCardProduct.
    */
   private mapToGiftCardProduct(product: ParsedReloadlyProduct): GiftCardProduct {

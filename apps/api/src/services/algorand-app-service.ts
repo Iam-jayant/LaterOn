@@ -1,5 +1,6 @@
 import algosdk from "algosdk";
 import type { ApiConfig } from "../config";
+import { AtomicTxBuilder } from "./atomic-tx-builder";
 
 export interface ChainTxResult {
   txId: string;
@@ -17,6 +18,7 @@ export class AlgorandAppService {
   private readonly algod: algosdk.Algodv2;
   private readonly signer?: SignerContext;
   private readonly enabled: boolean;
+  private readonly txBuilder: AtomicTxBuilder;
 
   public constructor(private readonly config: ApiConfig) {
     this.algod = new algosdk.Algodv2(config.algodToken, config.algodAddress, "");
@@ -27,6 +29,7 @@ export class AlgorandAppService {
         config.bnplAppId > 0 &&
         config.poolAppId > 0
     );
+    this.txBuilder = new AtomicTxBuilder(config);
   }
 
   public isEnabled(): boolean {
@@ -126,6 +129,79 @@ export class AlgorandAppService {
       return undefined;
     }
     return this.callNoOp(this.config.poolAppId, "set_paused", [algosdk.encodeUint64(paused ? 1 : 0)]);
+  }
+
+  /**
+   * Build unsigned marketplace transactions for frontend signing.
+   * Returns base64-encoded unsigned transactions.
+   * 
+   * @param borrowerAddress - User's wallet address
+   * @param financedAmountAlgo - Total amount to finance in ALGO
+   * @returns Array of base64-encoded unsigned transactions
+   */
+  public async buildMarketplaceTransactions(
+    borrowerAddress: string,
+    financedAmountAlgo: number
+  ): Promise<string[]> {
+    if (!this.enabled) {
+      throw new Error("Blockchain service not enabled");
+    }
+
+    // Calculate first installment (1/3 of total for 3-month tenure)
+    const firstInstallmentAlgo = financedAmountAlgo / 3;
+    const firstInstallmentMicroAlgo = Math.round(firstInstallmentAlgo * 1_000_000);
+    const totalAmountMicroAlgo = Math.round(financedAmountAlgo * 1_000_000);
+
+    // Calculate next due date (30 days from now)
+    const nextDueUnix = Math.floor(Date.now() / 1000) + (30 * 24 * 60 * 60);
+
+    // Generate plan ID (simple incrementing ID for now)
+    const planId = Date.now();
+
+    // Build atomic transaction group
+    const txGroup = await this.txBuilder.buildMarketplaceGroup({
+      borrowerAddress,
+      lendingPoolAddress: this.config.lendingPoolAddress,
+      merchantAddress: this.config.lendingPoolAddress, // For marketplace, merchant is the pool
+      firstInstallmentMicroAlgo,
+      totalAmountMicroAlgo,
+      nextDueUnix,
+      tierAtApproval: 0, // NEW tier
+      planId
+    });
+
+    // Convert transactions to base64
+    return txGroup.map(tx => Buffer.from(algosdk.encodeUnsignedTransaction(tx)).toString('base64'));
+  }
+
+  /**
+   * Submit signed transactions to the blockchain.
+   * 
+   * @param signedTransactions - Array of base64-encoded signed transactions
+   * @returns Transaction ID of the first transaction in the group
+   */
+  public async submitSignedTransactions(signedTransactions: string[]): Promise<string> {
+    if (!this.enabled) {
+      throw new Error("Blockchain service not enabled");
+    }
+
+    // Decode base64 signed transactions
+    const signedTxnBlobs = signedTransactions.map(txn => 
+      new Uint8Array(Buffer.from(txn, 'base64'))
+    );
+
+    // Submit transaction group
+    const sendResult = await this.algod.sendRawTransaction(signedTxnBlobs).do();
+    const txId = sendResult.txid;
+
+    // Wait for confirmation
+    await algosdk.waitForConfirmation(
+      this.algod,
+      txId,
+      this.config.chainWaitRounds
+    );
+
+    return txId;
   }
 
   private async callNoOp(

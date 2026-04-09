@@ -295,6 +295,216 @@ const registerCheckoutRoute = (app: HonoApp): void => {
 };
 
 /**
+ * POST /api/marketplace/checkout/prepare
+ * 
+ * Prepare marketplace checkout by building unsigned transactions.
+ * Returns base64-encoded unsigned transactions for frontend signing.
+ * 
+ * Request body:
+ * - quoteId: Quote ID from createMarketplaceQuote
+ * 
+ * Response:
+ * - transactions: Array of base64-encoded unsigned transactions
+ * 
+ * Status Codes:
+ * - 200: Success
+ * - 400: Invalid quote or expired
+ * - 402: Insufficient pool liquidity
+ * - 500: Transaction building failed
+ * 
+ * Validates:
+ * - Requirement 2.5: Build atomic transaction group
+ * - Requirement 2.6: Return unsigned transactions to frontend
+ */
+const registerCheckoutPrepareRoute = (app: HonoApp): void => {
+  app.post("/api/marketplace/checkout/prepare", async (c) => {
+    const body = await c.req.json();
+    const payload = checkoutRequestSchema.safeParse(body);
+    if (!payload.success) {
+      logger.error("Invalid checkout prepare request", { 
+        error: payload.error,
+        body
+      });
+      throw new ValidationError("Invalid checkout prepare request", payload.error);
+    }
+
+    try {
+      logger.info("Preparing marketplace checkout", {
+        quoteId: payload.data.quoteId
+      });
+
+      // Build unsigned transactions
+      const transactions = await c.var.ctx.marketplaceService.prepareCheckout(payload.data.quoteId);
+
+      logger.info("Marketplace checkout prepared successfully", {
+        quoteId: payload.data.quoteId,
+        transactionCount: transactions.length
+      });
+
+      return c.json({
+        transactions
+      }, 200);
+    } catch (error) {
+      logger.error("Marketplace checkout prepare failed", { 
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        quoteId: payload.data.quoteId
+      });
+
+      if (error instanceof ValidationError) {
+        throw error;
+      }
+
+      if (error instanceof Error) {
+        if (error.message.includes("Insufficient pool liquidity")) {
+          return c.json({
+            error: {
+              code: "INSUFFICIENT_LIQUIDITY",
+              message: "Insufficient pool liquidity. Please try again later.",
+              details: null
+            }
+          }, 402);
+        }
+
+        if (error.message.includes("Quote expired")) {
+          return c.json({
+            error: {
+              code: "QUOTE_EXPIRED",
+              message: "Quote expired. Please create a new quote.",
+              details: null
+            }
+          }, 400);
+        }
+      }
+
+      return c.json({
+        error: {
+          code: "PREPARE_FAILED",
+          message: "Failed to prepare checkout. Please try again later.",
+          details: null
+        }
+      }, 500);
+    }
+  });
+};
+
+/**
+ * POST /api/marketplace/checkout/confirm
+ * 
+ * Confirm marketplace checkout by submitting signed transactions and fulfilling gift card.
+ * 
+ * Request body:
+ * - quoteId: Quote ID from createMarketplaceQuote
+ * - signedTransactions: Array of base64-encoded signed transactions
+ * 
+ * Response:
+ * - success: true
+ * - giftCard: Gift card details with code and PIN
+ * 
+ * Status Codes:
+ * - 200: Success
+ * - 400: Invalid quote or expired
+ * - 500: Transaction submission failed or gift card fulfillment failed
+ * 
+ * Validates:
+ * - Requirement 2.7: Submit signed transactions to blockchain
+ * - Requirement 7.1: Call Reloadly API after transaction confirmation
+ * - Requirement 7.2: Retrieve gift card code and PIN
+ * - Requirement 7.6: Refund if Reloadly fulfillment fails
+ */
+const confirmRequestSchema = z.object({
+  quoteId: z.string().min(10),
+  signedTransactions: z.array(z.string())
+});
+
+const registerCheckoutConfirmRoute = (app: HonoApp): void => {
+  app.post("/api/marketplace/checkout/confirm", async (c) => {
+    const body = await c.req.json();
+    const payload = confirmRequestSchema.safeParse(body);
+    if (!payload.success) {
+      logger.error("Invalid checkout confirm request", { 
+        error: payload.error,
+        body
+      });
+      throw new ValidationError("Invalid checkout confirm request", payload.error);
+    }
+
+    try {
+      logger.info("Confirming marketplace checkout", {
+        quoteId: payload.data.quoteId,
+        transactionCount: payload.data.signedTransactions.length
+      });
+
+      // Submit signed transactions and fulfill gift card
+      const giftCard = await c.var.ctx.marketplaceService.confirmCheckout(
+        payload.data.quoteId,
+        payload.data.signedTransactions
+      );
+
+      logger.info("Marketplace checkout confirmed successfully", {
+        planId: giftCard.planId,
+        productName: giftCard.productName
+      });
+
+      return c.json({
+        success: true,
+        giftCard: {
+          code: giftCard.code,
+          pin: giftCard.pin,
+          productName: giftCard.productName,
+          denomination: giftCard.denomination,
+          expiresAt: giftCard.expiresAt,
+          planId: giftCard.planId
+        }
+      }, 200);
+    } catch (error) {
+      logger.error("Marketplace checkout confirm failed", { 
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        quoteId: payload.data.quoteId
+      });
+
+      if (error instanceof ValidationError) {
+        throw error;
+      }
+
+      if (error instanceof Error) {
+        if (error.message.includes("Quote expired")) {
+          return c.json({
+            error: {
+              code: "QUOTE_EXPIRED",
+              message: "Quote expired. Please create a new quote.",
+              details: null
+            }
+          }, 400);
+        }
+
+        if (error.message.includes("gift card delivery failed")) {
+          const txIdMatch = error.message.match(/transaction ID: ([a-zA-Z0-9_-]+)/);
+          const txId = txIdMatch ? txIdMatch[1] : "unknown";
+          
+          return c.json({
+            error: {
+              code: "FULFILLMENT_FAILED",
+              message: `Payment received but gift card delivery failed. Contact support with transaction ID: ${txId}`,
+              details: null
+            }
+          }, 500);
+        }
+      }
+
+      return c.json({
+        error: {
+          code: "CONFIRM_FAILED",
+          message: "Failed to confirm checkout. Please try again later.",
+          details: null
+        }
+      }, 500);
+    }
+  });
+};
+
+/**
  * GET /api/marketplace/gift-card/:planId
  * 
  * Retrieve gift card details for a plan.
@@ -408,5 +618,7 @@ export const registerMarketplaceRoutes = (app: HonoApp): void => {
   registerCatalogRoute(app);
   registerQuoteRoute(app);
   registerCheckoutRoute(app);
+  registerCheckoutPrepareRoute(app);
+  registerCheckoutConfirmRoute(app);
   registerGiftCardRoute(app);
 };

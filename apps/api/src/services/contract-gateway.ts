@@ -509,6 +509,154 @@ export class ContractGateway {
     });
   }
 
+  /**
+   * Build unsigned transactions for a marketplace quote without submitting them.
+   * Returns base64-encoded unsigned transactions for frontend signing.
+   * 
+   * @param quoteId - Quote ID from marketplace quote
+   * @returns Array of base64-encoded unsigned transactions
+   */
+  public async buildUnsignedTransactionsFromQuote(quoteId: string): Promise<string[]> {
+    if (this.store.protocolParams.paused) {
+      throw new ValidationError("Protocol is paused");
+    }
+
+    const quote = this.getQuote(quoteId);
+    if (quote.expiresAtUnix < nowUnix()) {
+      throw new ValidationError("Quote expired");
+    }
+
+    const user = await this.getOrCreateUser(quote.walletAddress);
+    if (user.bannedUntilUnix && user.bannedUntilUnix > nowUnix()) {
+      throw new ValidationError("Wallet is temporarily banned due to defaults");
+    }
+
+    const caps = TIER_CAPS[user.tier];
+    if (quote.orderAmountInr > caps.maxOrderInr) {
+      throw new ValidationError("Order exceeds tier max order cap");
+    }
+    if (user.activeOutstandingInr + quote.financedAmountInr > caps.maxOutstandingInr) {
+      throw new ValidationError("Order exceeds tier max outstanding cap");
+    }
+
+    if (quote.financedAmountAlgo > this.store.liquidity.availableAlgo) {
+      throw new InsufficientPoolLiquidityError({
+        availableAlgo: this.store.liquidity.availableAlgo,
+        requiredAlgo: quote.financedAmountAlgo,
+        quoteId: quote.quoteId
+      });
+    }
+
+    // Build unsigned transactions using the chain service
+    if (!this.chainService) {
+      throw new ValidationError("Blockchain service not available");
+    }
+
+    const unsignedTxns = await this.chainService.buildMarketplaceTransactions(
+      quote.walletAddress,
+      quote.financedAmountAlgo
+    );
+
+    return unsignedTxns;
+  }
+
+  /**
+   * Submit signed transactions and create a plan from a quote.
+   * Used after frontend has signed the transactions.
+   * 
+   * @param quoteId - Quote ID from marketplace quote
+   * @param signedTransactions - Array of base64-encoded signed transactions
+   * @returns Created plan record
+   */
+  public async createPlanFromSignedTransactions(
+    quoteId: string,
+    signedTransactions: string[]
+  ): Promise<PlanRecord> {
+    if (this.store.protocolParams.paused) {
+      throw new ValidationError("Protocol is paused");
+    }
+
+    const quote = this.getQuote(quoteId);
+    if (quote.expiresAtUnix < nowUnix()) {
+      throw new ValidationError("Quote expired");
+    }
+
+    const user = await this.getOrCreateUser(quote.walletAddress);
+
+    // Submit signed transactions to blockchain
+    if (!this.chainService) {
+      throw new ValidationError("Blockchain service not available");
+    }
+
+    const txId = await this.chainService.submitSignedTransactions(signedTransactions);
+
+    // Log blockchain transaction
+    logBlockchainTransaction({
+      operation: "marketplace_checkout",
+      txId,
+      sender: quote.walletAddress,
+      amount: quote.financedAmountAlgo
+    });
+
+    // Create plan record
+    const planId = createId("plan");
+    const createdAtUnix = nowUnix();
+    const dueDates = generateInstallmentDueDates(createdAtUnix, quote.tenureMonths);
+    const installmentAmountAlgo =
+      quote.installmentAmountAlgo > 0
+        ? quote.installmentAmountAlgo
+        : quote.tenureMonths > 0
+          ? quote.financedAmountAlgo / quote.tenureMonths
+          : quote.financedAmountAlgo;
+
+    const installments = dueDates.map((dueAtUnix, index) => ({
+      installmentNumber: index + 1,
+      dueAtUnix,
+      amountAlgo: installmentAmountAlgo
+    }));
+
+    const plan: PlanRecord = {
+      planId,
+      walletAddress: quote.walletAddress,
+      merchantId: quote.merchantId,
+      status: "ACTIVE",
+      tierAtApproval: user.tier,
+      tenureMonths: quote.tenureMonths,
+      aprPercent: quote.monthlyRate * 12 * 100,
+      createdAtUnix,
+      nextDueAtUnix: installments[0]?.dueAtUnix ?? createdAtUnix,
+      financedAmountInr: quote.financedAmountInr,
+      financedAmountAlgo: quote.financedAmountAlgo,
+      remainingAmountAlgo: quote.financedAmountAlgo,
+      installmentsPaid: 0,
+      installments
+    };
+
+    // Save to PostgresRepository if available
+    if (this.repository) {
+      await this.repository.savePlan(plan);
+    } else {
+      this.store.plans.set(plan.planId, plan);
+    }
+
+    this.store.liquidity.availableAlgo -= quote.financedAmountAlgo;
+    this.store.liquidity.totalLentAlgo += quote.financedAmountAlgo;
+    user.activeOutstandingInr += quote.financedAmountInr;
+    user.tier = determineTier(user);
+    this.store.users.set(user.walletAddress, user);
+    this.store.quotes.delete(quoteId);
+
+    this.emit("plan.created", {
+      planId: plan.planId,
+      walletAddress: plan.walletAddress,
+      merchantId: plan.merchantId,
+      financedAmountAlgo: plan.financedAmountAlgo,
+      txId
+    });
+
+    return plan;
+  }
+
   private emit(type: string, payload: unknown): void {
     this.store.events.push({
       id: this.store.nextEventId(),
