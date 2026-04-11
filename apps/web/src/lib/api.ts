@@ -149,6 +149,70 @@ export class ApiClient {
       body: JSON.stringify({ planId, txId, repaymentAmountAlgo }),
     });
   }
+
+  // Consent & Onboarding APIs
+  async saveConsent(params: {
+    walletAddress: string;
+    purpose: string;
+    txnId: string;
+  }): Promise<{ success: boolean; consentId: number }> {
+    return this.request('/api/consent/save', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  }
+
+  async analyseWallet(authToken: string): Promise<{
+    breakdown: {
+      walletAge: { value: string; points: number; maxPoints: number; barPercent: number };
+      transactionCount: { value: number; points: number; maxPoints: number; barPercent: number };
+      currentBalance: { value: string; points: number; maxPoints: number; barPercent: number };
+      defiActivity: { value: string; points: number; maxPoints: number; barPercent: number };
+      lateronHistory: { value: number; points: number; maxPoints: number; barPercent: number };
+      totalScore: number;
+      tier: string;
+      creditLimit: number;
+    };
+  }> {
+    return this.request('/api/user/analyse-wallet', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${authToken}`,
+      },
+    });
+  }
+
+  async checkUserExists(walletAddress: string): Promise<{ exists: boolean }> {
+    try {
+      await this.getUserProfile(walletAddress);
+      return { exists: true };
+    } catch {
+      return { exists: false };
+    }
+  }
+
+  // Data Access Log API
+  async getDataAccessLog(authToken: string): Promise<Array<{
+    operation: string;
+    accessedBy: string;
+    accessedAt: string;
+  }>> {
+    return this.request('/api/user/data-access-log', {
+      headers: {
+        authorization: `Bearer ${authToken}`,
+      },
+    });
+  }
+
+  // User Deletion API
+  async deleteUserData(authToken: string): Promise<{ success: boolean; message: string }> {
+    return this.request('/api/user/me', {
+      method: 'DELETE',
+      headers: {
+        authorization: `Bearer ${authToken}`,
+      },
+    });
+  }
 }
 
 export const apiClient = new ApiClient();
