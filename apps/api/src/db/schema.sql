@@ -84,3 +84,54 @@ CREATE TABLE IF NOT EXISTS gift_cards (
 
 -- Index for fast plan ID lookups
 CREATE INDEX IF NOT EXISTS idx_gift_cards_plan_id ON gift_cards(plan_id);
+
+-- ============================================================================
+-- DPDP Consent and Score ASA Migration
+-- ============================================================================
+
+-- Consent records table: stores DPDP Act 2023 compliant consent records
+CREATE TABLE IF NOT EXISTS consent_records (
+  id SERIAL PRIMARY KEY,
+  wallet_address TEXT NOT NULL,
+  purpose TEXT NOT NULL DEFAULT 'credit_scoring',
+  consent_timestamp BIGINT NOT NULL,
+  txn_id TEXT NOT NULL,
+  ip_hash TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  CONSTRAINT unique_wallet_purpose UNIQUE (wallet_address, purpose)
+);
+
+-- Index for fast wallet address lookups
+CREATE INDEX IF NOT EXISTS idx_consent_wallet ON consent_records(wallet_address);
+
+-- Index for transaction ID lookups
+CREATE INDEX IF NOT EXISTS idx_consent_txn ON consent_records(txn_id);
+
+-- Data access log table: audit trail for DPDP compliance
+CREATE TABLE IF NOT EXISTS data_access_log (
+  id SERIAL PRIMARY KEY,
+  wallet_address TEXT NOT NULL,
+  operation TEXT NOT NULL,
+  accessed_by TEXT NOT NULL,
+  accessed_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Index for fast wallet address lookups
+CREATE INDEX IF NOT EXISTS idx_access_log_wallet ON data_access_log(wallet_address);
+
+-- Index for timestamp-based queries (most recent first)
+CREATE INDEX IF NOT EXISTS idx_access_log_timestamp ON data_access_log(accessed_at DESC);
+
+-- Add score_asa_id column to users table for Score ASA tracking
+DO $
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_name = 'users' AND column_name = 'score_asa_id'
+  ) THEN
+    ALTER TABLE users ADD COLUMN score_asa_id BIGINT;
+  END IF;
+END $;
+
+-- Index for Score ASA lookups
+CREATE INDEX IF NOT EXISTS idx_users_score_asa ON users(score_asa_id);

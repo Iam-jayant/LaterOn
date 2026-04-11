@@ -345,4 +345,171 @@ export class PostgresRepository {
       expiresAt: row.expires_at
     };
   }
+
+  // ============================================================================
+  // DPDP Consent and Score ASA Methods
+  // ============================================================================
+
+  /**
+   * Save a consent record to the database.
+   * Stores DPDP Act 2023 compliant consent with transaction ID and hashed IP.
+   */
+  async saveConsentRecord(params: {
+    walletAddress: string;
+    purpose: string;
+    consentTimestamp: number;
+    txnId: string;
+    ipHash: string;
+  }): Promise<{ id: number }> {
+    const result = await this.pool.query(
+      `INSERT INTO consent_records (wallet_address, purpose, consent_timestamp, txn_id, ip_hash)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id`,
+      [params.walletAddress, params.purpose, params.consentTimestamp, params.txnId, params.ipHash]
+    );
+    return { id: result.rows[0].id };
+  }
+
+  /**
+   * Check if a consent record exists for a wallet and purpose.
+   * Returns true if valid consent exists, false otherwise.
+   */
+  async getConsentRecord(walletAddress: string, purpose: string): Promise<boolean> {
+    const result = await this.pool.query(
+      `SELECT 1 FROM consent_records 
+       WHERE wallet_address = $1 AND purpose = $2 
+       LIMIT 1`,
+      [walletAddress, purpose]
+    );
+    return result.rows.length > 0;
+  }
+
+  /**
+   * Insert a data access log entry for audit trail.
+   * Records all data access operations for DPDP compliance.
+   */
+  async insertDataAccessLog(params: {
+    walletAddress: string;
+    operation: string;
+    accessedBy: string;
+  }): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO data_access_log (wallet_address, operation, accessed_by)
+       VALUES ($1, $2, $3)`,
+      [params.walletAddress, params.operation, params.accessedBy]
+    );
+  }
+
+  /**
+   * Get all data access logs for a wallet address.
+   * Returns logs ordered by accessed_at DESC (most recent first).
+   */
+  async getDataAccessLogs(walletAddress: string): Promise<Array<{
+    id: number;
+    walletAddress: string;
+    operation: string;
+    accessedBy: string;
+    accessedAt: Date;
+  }>> {
+    const result = await this.pool.query(
+      `SELECT id, wallet_address, operation, accessed_by, accessed_at
+       FROM data_access_log
+       WHERE wallet_address = $1
+       ORDER BY accessed_at DESC`,
+      [walletAddress]
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      walletAddress: row.wallet_address,
+      operation: row.operation,
+      accessedBy: row.accessed_by,
+      accessedAt: row.accessed_at,
+    }));
+  }
+
+  /**
+   * Update the score_asa_id for a user.
+   * Stores the Algorand ASA ID representing the user's credit score.
+   */
+  async updateUserScoreASAId(walletAddress: string, asaId: number | null): Promise<void> {
+    await this.pool.query(
+      `UPDATE users 
+       SET score_asa_id = $2, updated_at = now()
+       WHERE wallet_address = $1`,
+      [walletAddress, asaId]
+    );
+  }
+
+  /**
+   * Update the later_on_score for a user.
+   * Updates the credit score after wallet analysis.
+   */
+  async updateUserScore(walletAddress: string, score: number): Promise<void> {
+    await this.pool.query(
+      `UPDATE users 
+       SET later_on_score = $2, updated_at = now()
+       WHERE wallet_address = $1`,
+      [walletAddress, score]
+    );
+  }
+
+  /**
+   * Delete all user data for DPDP right to erasure.
+   * Deletes user record, consent records, and data access logs.
+   * Marks payment plans as DELETED for audit purposes (does not delete).
+   */
+  async deleteUserData(walletAddress: string): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Mark payment plans as DELETED (preserve for audit)
+      await client.query(
+        `UPDATE payment_plans 
+         SET status = 'DELETED', updated_at = now()
+         WHERE borrower_wallet_address = $1`,
+        [walletAddress]
+      );
+
+      // Delete consent records
+      await client.query(
+        `DELETE FROM consent_records WHERE wallet_address = $1`,
+        [walletAddress]
+      );
+
+      // Delete data access logs
+      await client.query(
+        `DELETE FROM data_access_log WHERE wallet_address = $1`,
+        [walletAddress]
+      );
+
+      // Delete user record
+      await client.query(
+        `DELETE FROM users WHERE wallet_address = $1`,
+        [walletAddress]
+      );
+
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Get user by wallet address (without creating if not exists).
+   * Returns null if user does not exist.
+   */
+  async getUser(walletAddress: string): Promise<UserProfile | null> {
+    const result = await this.pool.query(
+      `SELECT * FROM users WHERE wallet_address = $1`,
+      [walletAddress]
+    );
+    if (result.rows.length === 0) {
+      return null;
+    }
+    return this.mapUser(result.rows[0]);
+  }
 }
