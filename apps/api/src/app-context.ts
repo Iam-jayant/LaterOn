@@ -14,6 +14,11 @@ import { InMemoryStore } from "./services/store";
 import { ReloadlyService } from "./services/reloadly-service";
 import { CoinGeckoService } from "./services/coingecko-service";
 import { MarketplaceService } from "./services/marketplace-service";
+import { ConsentService } from "./services/consent-service";
+import { WalletAnalysisService } from "./services/wallet-analysis-service";
+import { ScoreASAService } from "./services/score-asa-service";
+import { ScoreASALifecycleService } from "./services/score-asa-lifecycle";
+import algosdk from "algosdk";
 
 export interface AppContext {
   gateway: ContractGateway;
@@ -29,6 +34,10 @@ export interface AppContext {
   reloadlyService: ReloadlyService;
   coinGeckoService: CoinGeckoService;
   marketplaceService: MarketplaceService;
+  consentService: ConsentService;
+  walletAnalysisService: WalletAnalysisService;
+  scoreASAService: ScoreASAService;
+  scoreASALifecycleService: ScoreASALifecycleService;
   config: ApiConfig;
 }
 
@@ -77,6 +86,33 @@ export const createAppContext = async (config: Partial<ApiConfig>): Promise<AppC
     repository
   );
   
+  // Initialize consent and wallet analysis services
+  const ipHashSalt = process.env.IP_HASH_SALT ?? "default-salt-change-in-production";
+  const consentService = new ConsentService(repository, ipHashSalt);
+  
+  // Initialize Algorand Indexer client
+  const indexerAddress = process.env.INDEXER_ADDRESS ?? "https://testnet-idx.algonode.cloud";
+  const indexerToken = process.env.INDEXER_TOKEN ?? "";
+  const indexerClient = new algosdk.Indexer(indexerToken, indexerAddress, "");
+  const walletAnalysisService = new WalletAnalysisService(indexerClient, repository);
+  
+  // Initialize Score ASA services
+  const algodAddress = process.env.ALGOD_ADDRESS ?? "https://testnet-api.algonode.cloud";
+  const algodToken = process.env.ALGOD_TOKEN ?? "";
+  const algodClient = new algosdk.Algodv2(algodToken, algodAddress, "");
+  
+  // Get protocol account from mnemonic
+  const protocolMnemonic = process.env.PROTOCOL_MNEMONIC ?? "";
+  const protocolAccount = protocolMnemonic 
+    ? algosdk.mnemonicToSecretKey(protocolMnemonic)
+    : null as any; // Will fail if Score ASA operations are attempted
+  
+  const scoreASAService = new ScoreASAService(algodClient, protocolAccount, repository);
+  const scoreASALifecycleService = new ScoreASALifecycleService(repository, scoreASAService);
+  
+  // Inject lifecycle service into gateway (for clawback on default)
+  (gateway as any).scoreASALifecycleService = scoreASALifecycleService;
+  
   return {
     gateway,
     readModel,
@@ -91,6 +127,10 @@ export const createAppContext = async (config: Partial<ApiConfig>): Promise<AppC
     reloadlyService,
     coinGeckoService,
     marketplaceService,
+    consentService,
+    walletAnalysisService,
+    scoreASAService,
+    scoreASALifecycleService,
     config: resolvedConfig
   };
 };
