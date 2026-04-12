@@ -162,17 +162,30 @@ export class ApiClient {
     });
   }
 
+  async checkConsent(authToken: string, purpose: string): Promise<boolean> {
+    try {
+      const response = await this.request<{ hasConsent: boolean; txnId: string | null; consentTimestamp: string | null }>('/api/consent/check', {
+        headers: {
+          authorization: `Bearer ${authToken}`,
+        },
+      });
+      return response.hasConsent;
+    } catch {
+      return false;
+    }
+  }
+
   async analyseWallet(authToken: string): Promise<{
-    breakdown: {
-      walletAge: { value: string; points: number; maxPoints: number; barPercent: number };
-      transactionCount: { value: number; points: number; maxPoints: number; barPercent: number };
-      currentBalance: { value: string; points: number; maxPoints: number; barPercent: number };
-      defiActivity: { value: string; points: number; maxPoints: number; barPercent: number };
-      lateronHistory: { value: number; points: number; maxPoints: number; barPercent: number };
-      totalScore: number;
-      tier: string;
-      creditLimit: number;
-    };
+    breakdown: Array<{
+      signal: string;
+      value: string | number;
+      points: number;
+      maxPoints: number;
+      barPercent: number;
+    }>;
+    totalScore: number;
+    tier: string;
+    creditLimit: number;
   }> {
     return this.request('/api/user/analyse-wallet', {
       method: 'POST',

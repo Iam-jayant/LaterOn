@@ -145,21 +145,13 @@ export function GiftCardGrid({
               e.currentTarget.style.boxShadow = "none";
             }}
           >
-            {/* Brand Logo and Name (Requirement 2.4) - Clickable Header */}
+            {/* Brand Logo and Name */}
             <div 
               style={{ 
                 display: "flex", 
                 alignItems: "center", 
                 gap: "12px", 
-                marginBottom: "16px",
-                cursor: "pointer"
-              }}
-              onClick={() => onCardClick(product.productId)}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.opacity = "0.8";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.opacity = "1";
+                marginBottom: "16px"
               }}
             >
               <img
@@ -173,44 +165,66 @@ export function GiftCardGrid({
                 }}
               />
               <div>
-                <h3 style={{ margin: 0, fontSize: "18px" }}>{product.brandName}</h3>
-                <p style={{ margin: 0, fontSize: "12px", color: "var(--muted)" }}>
+                <h3 style={{ margin: 0, fontSize: "18px", fontFamily: "var(--font-heading)" }}>{product.brandName}</h3>
+                <p style={{ margin: 0, fontSize: "12px", color: "var(--muted)", fontFamily: "var(--font-sans)" }}>
                   {product.productName}
                 </p>
               </div>
             </div>
 
-            {/* Denominations (Requirement 2.4) - Conditionally Rendered */}
-            {expandedProductId === product.productId && (
-              <div style={{ marginTop: "16px" }}>
-                <p style={{ fontSize: "12px", color: "var(--muted)", marginBottom: "8px" }}>
-                  Available denominations:
-                </p>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-                  {product.denominations.map((denomination) => (
-                    <button
-                      key={denomination}
-                      type="button"
-                      className="secondary denomination-button"
-                      style={{
-                        padding: "12px 16px",
-                        fontSize: "14px",
-                        minWidth: "44px",
-                        minHeight: "44px",
-                        backgroundColor:
-                          selectedProduct?.productId === product.productId &&
-                          selectedDenomination === denomination
-                            ? "var(--accent)"
-                            : "transparent"
-                      }}
-                      onClick={() => onCardSelect(product, denomination)}
-                    >
-                      ₹{denomination}
-                    </button>
-                  ))}
-                </div>
+            {/* Denominations - Always visible */}
+            <div style={{ marginTop: "16px" }}>
+              <p style={{ fontSize: "12px", color: "var(--muted)", marginBottom: "8px" }}>
+                Select amount:
+              </p>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                {product.denominations.slice(0, 3).map((denomination) => (
+                  <button
+                    key={denomination}
+                    type="button"
+                    className="secondary denomination-button"
+                    style={{
+                      padding: "12px 16px",
+                      fontSize: "14px",
+                      minWidth: "44px",
+                      minHeight: "44px",
+                      fontFamily: "var(--font-sans)",
+                      backgroundColor:
+                        selectedProduct?.productId === product.productId &&
+                        selectedDenomination === denomination
+                          ? "var(--accent)"
+                          : "transparent"
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onCardSelect(product, denomination);
+                    }}
+                  >
+                    ₹{denomination}
+                  </button>
+                ))}
+                {product.denominations.length > 3 && (
+                  <button
+                    type="button"
+                    className="secondary denomination-button"
+                    style={{
+                      padding: "12px 16px",
+                      fontSize: "12px",
+                      minWidth: "44px",
+                      minHeight: "44px",
+                      fontFamily: "var(--font-sans)",
+                      color: "var(--muted)"
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onCardClick(product.productId);
+                    }}
+                  >
+                    +{product.denominations.length - 3} more
+                  </button>
+                )}
               </div>
-            )}
+            </div>
           </div>
         ))}
       </div>

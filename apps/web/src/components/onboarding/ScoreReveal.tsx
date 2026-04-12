@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { apiClient } from "@/lib/api";
+import { PRIMARY, BACKGROUND, TEXT, SUCCESS } from "@/lib/colors";
 
 interface ScoreRevealProps {
   authToken: string;
@@ -9,6 +10,7 @@ interface ScoreRevealProps {
 }
 
 interface WalletSignal {
+  signal: string;
   value: string | number;
   points: number;
   maxPoints: number;
@@ -16,11 +18,7 @@ interface WalletSignal {
 }
 
 interface ScoreBreakdown {
-  walletAge: WalletSignal;
-  transactionCount: WalletSignal;
-  currentBalance: WalletSignal;
-  defiActivity: WalletSignal;
-  lateronHistory: WalletSignal;
+  breakdown: WalletSignal[];
   totalScore: number;
   tier: string;
   creditLimit: number;
@@ -39,7 +37,7 @@ export function ScoreReveal({ authToken, onComplete }: ScoreRevealProps) {
       try {
         setIsLoading(true);
         const result = await apiClient.analyseWallet(authToken);
-        setBreakdown(result.breakdown);
+        setBreakdown(result);
         setError(null);
       } catch (err) {
         console.error("Wallet analysis failed:", err);
@@ -213,12 +211,21 @@ export function ScoreReveal({ authToken, onComplete }: ScoreRevealProps) {
 
   if (!breakdown) return null;
 
+  // Convert breakdown array to object for easier access
+  const breakdownObj = {
+    walletAge: breakdown.breakdown.find((s: any) => s.signal === "Wallet Age"),
+    transactionCount: breakdown.breakdown.find((s: any) => s.signal === "Transaction Count"),
+    currentBalance: breakdown.breakdown.find((s: any) => s.signal === "ALGO Balance"),
+    defiActivity: breakdown.breakdown.find((s: any) => s.signal === "DeFi Activity"),
+    lateronHistory: breakdown.breakdown.find((s: any) => s.signal === "LaterOn History"),
+  };
+
   const signals = [
-    { label: "Wallet Age", signal: breakdown.walletAge, step: 0 },
-    { label: "Transaction Count", signal: breakdown.transactionCount, step: 1 },
-    { label: "Current Balance", signal: breakdown.currentBalance, step: 2 },
-    { label: "DeFi Activity", signal: breakdown.defiActivity, step: 3 },
-    { label: "LaterOn History", signal: breakdown.lateronHistory, step: 4 },
+    { label: "Wallet Age", signal: breakdownObj.walletAge, step: 0 },
+    { label: "Transaction Count", signal: breakdownObj.transactionCount, step: 1 },
+    { label: "Current Balance", signal: breakdownObj.currentBalance, step: 2 },
+    { label: "DeFi Activity", signal: breakdownObj.defiActivity, step: 3 },
+    { label: "LaterOn History", signal: breakdownObj.lateronHistory, step: 4 },
   ];
 
   const showFinalScore = animationStep >= 5;
@@ -229,7 +236,7 @@ export function ScoreReveal({ authToken, onComplete }: ScoreRevealProps) {
         <h1 className="title">Your Credit Score</h1>
 
         <div className="signals">
-          {signals.map(({ label, signal, step }) => (
+          {signals.map(({ label, signal, step }) => signal && (
             <div key={label} className="signal-row">
               <div className="signal-header">
                 <span className="signal-label">{label}</span>
@@ -271,25 +278,41 @@ export function ScoreReveal({ authToken, onComplete }: ScoreRevealProps) {
           display: flex;
           align-items: center;
           justify-content: center;
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          background: ${BACKGROUND};
           padding: 24px;
+          position: relative;
+        }
+
+        .container::before {
+          content: '';
+          position: absolute;
+          inset: 0;
+          background-image: radial-gradient(circle, ${TEXT}0A 1px, transparent 1px);
+          background-size: 28px 28px;
+          pointer-events: none;
+          opacity: 0.5;
         }
 
         .card {
           background: white;
-          border-radius: 16px;
+          border: 1px solid ${TEXT}14;
+          border-radius: 20px;
           padding: 48px;
           max-width: 600px;
           width: 100%;
-          box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+          box-shadow: 0 8px 32px ${TEXT}14;
+          position: relative;
+          z-index: 1;
         }
 
         .title {
+          font-family: "'Space Grotesk', sans-serif";
           font-size: 32px;
-          font-weight: 600;
+          font-weight: 700;
           margin: 0 0 32px 0;
           text-align: center;
-          color: #1a1a1a;
+          color: ${TEXT};
+          letter-spacing: -0.8px;
         }
 
         .signals {
@@ -307,81 +330,93 @@ export function ScoreReveal({ authToken, onComplete }: ScoreRevealProps) {
         }
 
         .signal-label {
-          font-size: 16px;
+          font-family: "'Inter', sans-serif";
+          font-size: 15px;
           font-weight: 500;
-          color: #333;
+          color: ${TEXT};
         }
 
         .signal-value {
+          font-family: "'Inter', sans-serif";
           font-size: 14px;
-          color: #666;
+          color: ${TEXT}80;
         }
 
         .bar-container {
-          height: 12px;
-          background: #f0f0f0;
-          border-radius: 6px;
+          height: 8px;
+          background: ${BACKGROUND};
+          border-radius: 4px;
           overflow: hidden;
           margin-bottom: 4px;
+          border: 1px solid ${TEXT}0D;
         }
 
         .bar-fill {
           height: 100%;
-          background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+          background: ${SUCCESS};
           transition: width 0.3s ease-out;
         }
 
         .signal-points {
-          font-size: 12px;
-          color: #999;
+          font-family: "'Inter', sans-serif";
+          font-size: 13px;
+          color: ${TEXT}66;
           text-align: right;
         }
 
         .score-section {
           text-align: center;
           padding-top: 32px;
-          border-top: 2px solid #f0f0f0;
+          border-top: 2px solid ${TEXT}0D;
           animation: fadeIn 0.5s ease-in;
         }
 
         .score-display {
+          font-family: "'Space Grotesk', sans-serif";
           font-size: 72px;
           font-weight: 700;
-          color: #667eea;
+          color: ${TEXT};
           margin-bottom: 16px;
+          letter-spacing: -2px;
         }
 
         .tier-badge {
           display: inline-block;
-          background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-          color: white;
+          background: ${PRIMARY};
+          color: ${TEXT};
           padding: 8px 24px;
           border-radius: 20px;
-          font-size: 18px;
+          font-family: "'Inter', sans-serif";
+          font-size: 16px;
           font-weight: 600;
           margin-bottom: 16px;
         }
 
         .credit-limit {
-          font-size: 20px;
-          color: #333;
+          font-family: "'Inter', sans-serif";
+          font-size: 18px;
+          color: ${TEXT}80;
           margin-bottom: 32px;
         }
 
         .continue-button {
-          background: #0066cc;
-          color: white;
+          background: ${PRIMARY};
+          color: ${TEXT};
           border: none;
-          border-radius: 8px;
+          border-radius: 12px;
           padding: 14px 48px;
-          font-size: 18px;
-          font-weight: 500;
+          font-family: "'Inter', sans-serif";
+          font-size: 16px;
+          font-weight: 600;
           cursor: pointer;
-          transition: background 0.2s;
+          transition: all 0.2s;
+          box-shadow: 0 4px 16px ${SUCCESS}33;
         }
 
         .continue-button:hover {
-          background: #0052a3;
+          background: #e4ee8c;
+          transform: translateY(-1px);
+          box-shadow: 0 6px 20px ${SUCCESS}47;
         }
 
         @keyframes fadeIn {
