@@ -46,11 +46,33 @@ export const createAppContext = async (config: Partial<ApiConfig>): Promise<AppC
   const store = new InMemoryStore();
   const chainService = new AlgorandAppService(resolvedConfig);
 
-  // Initialize PostgreSQL connection pool and repository (optional)
-  let repository: PostgresRepository;
+  // Initialize database repository (PostgreSQL or Supabase)
+  let repository: PostgresRepository | any;
   let mirror: PostgresMirror;
   
-  if (resolvedConfig.databaseUrl) {
+  // Prefer Supabase client if configured
+  if (process.env.SUPABASE_SERVICE_ROLE_KEY && process.env.NEXT_PUBLIC_SUPABASE_URL) {
+    const { createClient } = await import("@supabase/supabase-js");
+    const { SupabaseRepository } = await import("./db/supabase-repository.js");
+    
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_ROLE_KEY,
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false,
+        },
+      }
+    );
+    
+    repository = new SupabaseRepository(supabase);
+    await repository.init();
+    
+    // Mirror not needed with Supabase (direct access)
+    mirror = null as any;
+  } else if (resolvedConfig.databaseUrl) {
+    // Fallback to PostgreSQL connection pool
     const pool = new Pool({
       connectionString: resolvedConfig.databaseUrl,
       min: 2,
@@ -63,7 +85,7 @@ export const createAppContext = async (config: Partial<ApiConfig>): Promise<AppC
     await mirror.init();
   } else {
     // Create stub implementations when database is not configured
-    repository = null as any; // Will be handled by services
+    repository = null as any;
     mirror = null as any;
   }
 

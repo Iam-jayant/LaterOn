@@ -33,6 +33,12 @@ export interface ApiConfig {
   lendingPoolAddress: string;
   marketplaceMerchantId: string;
   marketplaceTenureMonths: number;
+  indexerAddress: string;
+  indexerToken: string;
+  protocolMnemonic?: string;
+  protocolAddress: string;
+  ipHashSalt: string;
+  knownDefiAppIds: number[];
 }
 
 const envNumber = (key: string, fallback: number): number => {
@@ -78,6 +84,15 @@ const parseCorsOrigins = (input?: string): string[] => {
     .filter((item) => item.length > 0);
 };
 
+const parseKnownDefiAppIds = (input?: string): number[] => {
+  const source = input && input.trim().length > 0 ? input : "21580889,552635992,1166022341";
+  return source
+    .split(",")
+    .map((item) => item.trim())
+    .map((item) => parseInt(item, 10))
+    .filter((item) => !isNaN(item));
+};
+
 const rawEnvConfig = (): Partial<ApiConfig> => ({
   apiPort: envNumber("API_PORT", 4000),
   quoteTtlSeconds: envNumber("QUOTE_TTL_SECONDS", 300),
@@ -112,7 +127,13 @@ const rawEnvConfig = (): Partial<ApiConfig> => ({
   coinGeckoFallbackRate: envNumber("COINGECKO_FALLBACK_RATE", 0.0022),
   lendingPoolAddress: process.env.LENDING_POOL_ADDRESS ?? "",
   marketplaceMerchantId: process.env.MARKETPLACE_MERCHANT_ID ?? "reloadly",
-  marketplaceTenureMonths: envNumber("MARKETPLACE_TENURE_MONTHS", 3)
+  marketplaceTenureMonths: envNumber("MARKETPLACE_TENURE_MONTHS", 3),
+  indexerAddress: process.env.INDEXER_ADDRESS ?? "https://testnet-idx.algonode.cloud",
+  indexerToken: process.env.INDEXER_TOKEN ?? "",
+  protocolMnemonic: process.env.PROTOCOL_MNEMONIC,
+  protocolAddress: process.env.PROTOCOL_ADDRESS ?? "",
+  ipHashSalt: process.env.IP_HASH_SALT ?? "",
+  knownDefiAppIds: parseKnownDefiAppIds(process.env.KNOWN_DEFI_APP_IDS)
 });
 
 const defaults: ApiConfig = {
@@ -149,7 +170,13 @@ const defaults: ApiConfig = {
   coinGeckoFallbackRate: 0.0022,
   lendingPoolAddress: "",
   marketplaceMerchantId: "reloadly",
-  marketplaceTenureMonths: 3
+  marketplaceTenureMonths: 3,
+  indexerAddress: "https://testnet-idx.algonode.cloud",
+  indexerToken: "",
+  protocolMnemonic: undefined,
+  protocolAddress: "",
+  ipHashSalt: "",
+  knownDefiAppIds: parseKnownDefiAppIds()
 };
 
 export const resolveConfig = (partial: Partial<ApiConfig>): ApiConfig => ({
