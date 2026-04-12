@@ -34,7 +34,7 @@ export class DatabaseMigrations {
 
   /**
    * Run all migrations to setup database schema
-   * Creates tables and indexes from schema.sql
+   * Creates tables and indexes from schema.sql and additional migrations
    */
   async runMigrations(): Promise<void> {
     const client = await this.pool.connect();
@@ -49,6 +49,10 @@ export class DatabaseMigrations {
       // Execute schema creation
       await client.query("BEGIN");
       await client.query(schemaSql);
+      
+      // Run additional migrations
+      await this.runAdditionalMigrations(client);
+      
       await client.query("COMMIT");
       
       console.log("[Migrations] Database schema created successfully");
@@ -67,10 +71,38 @@ export class DatabaseMigrations {
   }
 
   /**
+   * Run additional migration files
+   */
+  private async runAdditionalMigrations(client: any): Promise<void> {
+    const migrations = [
+      "003_dpdp_consent_score_asa.sql"
+    ];
+
+    for (const migrationFile of migrations) {
+      try {
+        const migrationPath = join(__dirname, "migrations", migrationFile);
+        const migrationSql = readFileSync(migrationPath, "utf-8");
+        await client.query(migrationSql);
+        console.log(`[Migrations] Applied migration: ${migrationFile}`);
+      } catch (error) {
+        console.error(`[Migrations] Failed to apply migration ${migrationFile}:`, error);
+        throw error;
+      }
+    }
+  }
+
+  /**
    * Verify that all required tables exist
    */
   private async verifySchema(client: any): Promise<void> {
-    const requiredTables = ["users", "payment_plans", "lender_deposits", "gift_cards"];
+    const requiredTables = [
+      "users", 
+      "payment_plans", 
+      "lender_deposits", 
+      "gift_cards",
+      "consent_records",
+      "data_access_log"
+    ];
     
     for (const tableName of requiredTables) {
       const result = await client.query(

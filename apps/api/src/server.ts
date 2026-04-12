@@ -19,6 +19,8 @@ import { registerRepaymentRoutes } from "./routes/repayment.js";
 import { registerLenderRoutes } from "./routes/lender.js";
 import { registerAdminRoutes } from "./routes/admin.js";
 import { registerMarketplaceRoutes } from "./routes/marketplace.js";
+import { registerConsentRoutes } from "./routes/consent.js";
+import { registerUserRoutes } from "./routes/user.js";
 
 // Extend Hono context with AppContext
 type HonoApp = Hono<{ Variables: { ctx: AppContext } }>;
@@ -151,6 +153,12 @@ const createRoutes = (app: HonoApp): void => {
 
   // Register marketplace routes
   registerMarketplaceRoutes(app);
+
+  // Register consent routes
+  registerConsentRoutes(app);
+
+  // Register user routes
+  registerUserRoutes(app);
 
   app.post("/v1/auth/challenge", async (c) => {
     const body = await c.req.json();
@@ -458,10 +466,18 @@ export const buildServer = (ctx: AppContext): HonoApp => {
 
   // Health check endpoint
   app.get("/health", async (c) => {
-    // Test database connection if available
-    if (ctx.config.databaseUrl) {
+    // Test database connection if available (PostgreSQL or Supabase)
+    const hasDatabase = ctx.config.databaseUrl || 
+                       (process.env.SUPABASE_SERVICE_ROLE_KEY && process.env.NEXT_PUBLIC_SUPABASE_URL);
+    
+    if (hasDatabase) {
       try {
-        await ctx.readModel.sync();
+        // Test database with a simple query
+        if (ctx.repository && ctx.repository.healthCheck) {
+          await ctx.repository.healthCheck();
+        } else if (ctx.readModel) {
+          await ctx.readModel.sync();
+        }
         return c.json({
           status: "ok",
           database: "connected"
