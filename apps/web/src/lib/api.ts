@@ -90,6 +90,31 @@ export class ApiClient {
     return this.request<Plan[]>(`/api/user/${walletAddress}/plans`, { headers });
   }
 
+  async getUserPurchases(authToken: string): Promise<Array<{
+    planId: string;
+    productName: string;
+    denomination: number;
+    code: string;
+    pin: string;
+    purchasedAt: string;
+    expiresAt: string | null;
+  }>> {
+    const response = await this.request<{ purchases: Array<{
+      planId: string;
+      productName: string;
+      denomination: number;
+      code: string;
+      pin: string;
+      purchasedAt: string;
+      expiresAt: string | null;
+    }> }>('/api/user/purchases', {
+      headers: {
+        authorization: `Bearer ${authToken}`
+      }
+    });
+    return response.purchases;
+  }
+
   // Checkout APIs
   async createQuote(params: {
     walletAddress: string;
