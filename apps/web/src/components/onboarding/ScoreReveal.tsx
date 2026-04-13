@@ -108,19 +108,19 @@ export function ScoreReveal({ authToken, onComplete }: ScoreRevealProps) {
             display: flex;
             align-items: center;
             justify-content: center;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #FFFFFF;
           }
 
           .loading {
             text-align: center;
-            color: white;
+            color: #0A0C12;
           }
 
           .spinner {
             width: 48px;
             height: 48px;
-            border: 4px solid rgba(255, 255, 255, 0.3);
-            border-top-color: white;
+            border: 4px solid rgba(10,12,18,0.1);
+            border-top-color: #6b7a00;
             border-radius: 50%;
             animation: spin 1s linear infinite;
             margin: 0 auto 16px;
@@ -133,8 +133,11 @@ export function ScoreReveal({ authToken, onComplete }: ScoreRevealProps) {
           }
 
           .loading p {
-            font-size: 18px;
+            font-family: 'Inter', sans-serif;
+            font-size: 16px;
             margin: 0;
+            font-weight: 500;
+            color: rgba(10,12,18,0.6);
           }
         `}</style>
       </div>
@@ -158,16 +161,17 @@ export function ScoreReveal({ authToken, onComplete }: ScoreRevealProps) {
             display: flex;
             align-items: center;
             justify-content: center;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #FFFFFF;
           }
 
           .error-card {
-            background: white;
-            border-radius: 16px;
+            background: #FFFFFF;
+            border: 1px solid rgba(10,12,18,0.07);
+            border-radius: 20px;
             padding: 48px;
             max-width: 400px;
             text-align: center;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            box-shadow: 0 4px 16px rgba(10,12,18,0.06);
           }
 
           .error-icon {
@@ -176,33 +180,39 @@ export function ScoreReveal({ authToken, onComplete }: ScoreRevealProps) {
           }
 
           .error-card h2 {
+            font-family: 'Space Grotesk', sans-serif;
             font-size: 24px;
-            font-weight: 600;
+            font-weight: 700;
             margin: 0 0 12px 0;
-            color: #1a1a1a;
+            color: #0A0C12;
           }
 
           .error-card p {
-            font-size: 16px;
-            color: #666;
+            font-family: 'Inter', sans-serif;
+            font-size: 15px;
+            color: rgba(10,12,18,0.5);
             margin: 0 0 24px 0;
             line-height: 1.5;
           }
 
           .retry-button {
-            background: #0066cc;
-            color: white;
+            background: #D7E377;
+            color: #0A0C12;
             border: none;
-            border-radius: 8px;
+            border-radius: 12px;
             padding: 12px 32px;
-            font-size: 16px;
-            font-weight: 500;
+            font-family: 'Inter', sans-serif;
+            font-size: 15px;
+            font-weight: 600;
             cursor: pointer;
-            transition: background 0.2s;
+            transition: all 0.22s;
+            box-shadow: 0 4px 20px rgba(107,122,0,0.25);
           }
 
           .retry-button:hover {
-            background: #0052a3;
+            background: #e4ee8c;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 28px rgba(107,122,0,0.32);
           }
         `}</style>
       </div>
@@ -230,41 +240,87 @@ export function ScoreReveal({ authToken, onComplete }: ScoreRevealProps) {
 
   const showFinalScore = animationStep >= 5;
 
+  // Calculate score percentage (assuming max score is 1000)
+  const scorePercentage = showFinalScore ? (displayScore / 1000) * 100 : 0;
+  const circumference = 2 * Math.PI * 130; // radius = 130
+  const strokeDashoffset = circumference - (scorePercentage / 100) * circumference;
+
   return (
     <div className="container">
-      <div className="card">
+      <div className="unified-card">
         <h1 className="title">Your Credit Score</h1>
 
-        <div className="signals">
-          {signals.map(({ label, signal, step }) => signal && (
-            <div key={label} className="signal-row">
-              <div className="signal-header">
-                <span className="signal-label">{label}</span>
-                <span className="signal-value">{signal.value}</span>
+        <div className="content-grid">
+          {/* Left Column - Score Breakdown */}
+          <div className="signals">
+            {signals.map(({ label, signal, step }) => signal && (
+              <div key={label} className="signal-row">
+                <div className="signal-header">
+                  <span className="signal-label">{label}</span>
+                  <span className="signal-value">{signal.value}</span>
+                </div>
+                <div className="bar-container">
+                  <div
+                    className="bar-fill"
+                    style={{
+                      width:
+                        animationStep > step ? `${signal.barPercent}%` : "0%",
+                    }}
+                  />
+                </div>
+                <div className="signal-points">
+                  {signal.points} / {signal.maxPoints} pts
+                </div>
               </div>
-              <div className="bar-container">
-                <div
-                  className="bar-fill"
+            ))}
+          </div>
+
+          {/* Right Column - Animated Score Circle */}
+          <div className="score-section">
+            <div className="circle-container">
+              <svg className="progress-ring" width="280" height="280">
+                <circle
+                  className="progress-ring-bg"
+                  stroke="rgba(10,12,18,0.06)"
+                  strokeWidth="8"
+                  fill="transparent"
+                  r="130"
+                  cx="140"
+                  cy="140"
+                />
+                <circle
+                  className="progress-ring-circle"
+                  stroke="#6b7a00"
+                  strokeWidth="8"
+                  fill="transparent"
+                  r="130"
+                  cx="140"
+                  cy="140"
                   style={{
-                    width:
-                      animationStep > step ? `${signal.barPercent}%` : "0%",
+                    strokeDasharray: circumference,
+                    strokeDashoffset: showFinalScore ? strokeDashoffset : circumference,
+                    transition: 'stroke-dashoffset 1.5s ease-out',
                   }}
                 />
-              </div>
-              <div className="signal-points">
-                {signal.points} / {signal.maxPoints} pts
+              </svg>
+              <div className="score-content">
+                <div className="score-display">{displayScore}</div>
+                {showFinalScore && (
+                  <>
+                    <div className="tier-badge">{breakdown.tier}</div>
+                    <div className="credit-limit">
+                      Credit Limit: ₹{breakdown.creditLimit.toLocaleString()}
+                    </div>
+                  </>
+                )}
               </div>
             </div>
-          ))}
+          </div>
         </div>
 
+        {/* Centered Button */}
         {showFinalScore && (
-          <div className="score-section">
-            <div className="score-display">{displayScore}</div>
-            <div className="tier-badge">{breakdown.tier}</div>
-            <div className="credit-limit">
-              Credit Limit: ₹{breakdown.creditLimit.toLocaleString()}
-            </div>
+          <div className="button-container">
             <button onClick={onComplete} className="continue-button">
               Continue to Marketplace
             </button>
@@ -278,155 +334,237 @@ export function ScoreReveal({ authToken, onComplete }: ScoreRevealProps) {
           display: flex;
           align-items: center;
           justify-content: center;
-          background: ${BACKGROUND};
-          padding: 24px;
+          background: #FFFFFF;
+          padding: 32px;
           position: relative;
         }
 
-        .container::before {
-          content: '';
-          position: absolute;
-          inset: 0;
-          background-image: radial-gradient(circle, ${TEXT}0A 1px, transparent 1px);
-          background-size: 28px 28px;
-          pointer-events: none;
-          opacity: 0.5;
-        }
-
-        .card {
-          background: white;
-          border: 1px solid ${TEXT}14;
-          border-radius: 20px;
+        .unified-card {
+          background: #FFFFFF;
+          border: 1px solid rgba(10,12,18,0.07);
+          border-radius: 24px;
           padding: 48px;
-          max-width: 600px;
+          max-width: 1100px;
           width: 100%;
-          box-shadow: 0 8px 32px ${TEXT}14;
+          box-shadow: 0 4px 16px rgba(10,12,18,0.06);
           position: relative;
           z-index: 1;
         }
 
         .title {
-          font-family: "'Space Grotesk', sans-serif";
+          font-family: 'Space Grotesk', sans-serif;
           font-size: 32px;
           font-weight: 700;
-          margin: 0 0 32px 0;
-          text-align: center;
-          color: ${TEXT};
+          margin: 0 0 40px 0;
+          color: #0A0C12;
           letter-spacing: -0.8px;
+          text-align: center;
+        }
+
+        .content-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 48px;
+          margin-bottom: 40px;
         }
 
         .signals {
-          margin-bottom: 32px;
+          display: flex;
+          flex-direction: column;
+          gap: 20px;
         }
 
         .signal-row {
-          margin-bottom: 24px;
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
         }
 
         .signal-header {
           display: flex;
           justify-content: space-between;
-          margin-bottom: 8px;
+          align-items: center;
         }
 
         .signal-label {
-          font-family: "'Inter', sans-serif";
-          font-size: 15px;
+          font-family: 'Inter', sans-serif;
+          font-size: 14px;
           font-weight: 500;
-          color: ${TEXT};
+          color: #0A0C12;
         }
 
         .signal-value {
-          font-family: "'Inter', sans-serif";
-          font-size: 14px;
-          color: ${TEXT}80;
+          font-family: 'Inter', sans-serif;
+          font-size: 13px;
+          color: rgba(10,12,18,0.5);
         }
 
         .bar-container {
-          height: 8px;
-          background: ${BACKGROUND};
-          border-radius: 4px;
+          height: 6px;
+          background: rgba(10,12,18,0.06);
+          border-radius: 3px;
           overflow: hidden;
-          margin-bottom: 4px;
-          border: 1px solid ${TEXT}0D;
         }
 
         .bar-fill {
           height: 100%;
-          background: ${SUCCESS};
+          background: #6b7a00;
           transition: width 0.3s ease-out;
         }
 
         .signal-points {
-          font-family: "'Inter', sans-serif";
-          font-size: 13px;
-          color: ${TEXT}66;
+          font-family: 'Inter', sans-serif;
+          font-size: 12px;
+          color: rgba(10,12,18,0.45);
           text-align: right;
         }
 
         .score-section {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .circle-container {
+          position: relative;
+          width: 280px;
+          height: 280px;
+        }
+
+        .progress-ring {
+          transform: rotate(-90deg);
+        }
+
+        .progress-ring-circle {
+          stroke-linecap: round;
+        }
+
+        .score-content {
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
           text-align: center;
-          padding-top: 32px;
-          border-top: 2px solid ${TEXT}0D;
-          animation: fadeIn 0.5s ease-in;
+          width: 100%;
         }
 
         .score-display {
-          font-family: "'Space Grotesk', sans-serif";
-          font-size: 72px;
+          font-family: 'Space Grotesk', sans-serif;
+          font-size: 64px;
           font-weight: 700;
-          color: ${TEXT};
-          margin-bottom: 16px;
+          color: #0A0C12;
+          margin-bottom: 8px;
           letter-spacing: -2px;
+          line-height: 1;
         }
 
         .tier-badge {
           display: inline-block;
-          background: ${PRIMARY};
-          color: ${TEXT};
-          padding: 8px 24px;
-          border-radius: 20px;
-          font-family: "'Inter', sans-serif";
-          font-size: 16px;
+          background: #D7E377;
+          color: #0A0C12;
+          padding: 6px 20px;
+          border-radius: 16px;
+          font-family: 'Inter', sans-serif;
+          font-size: 14px;
           font-weight: 600;
-          margin-bottom: 16px;
+          margin-bottom: 8px;
+          animation: fadeIn 0.5s ease-in 0.3s both;
         }
 
         .credit-limit {
-          font-family: "'Inter', sans-serif";
-          font-size: 18px;
-          color: ${TEXT}80;
-          margin-bottom: 32px;
+          font-family: 'Inter', sans-serif;
+          font-size: 13px;
+          color: rgba(10,12,18,0.5);
+          animation: fadeIn 0.5s ease-in 0.4s both;
+        }
+
+        .button-container {
+          display: flex;
+          justify-content: center;
+          padding-top: 24px;
+          border-top: 1px solid rgba(10,12,18,0.07);
+          animation: fadeIn 0.5s ease-in 0.5s both;
         }
 
         .continue-button {
-          background: ${PRIMARY};
-          color: ${TEXT};
+          background: #D7E377;
+          color: #0A0C12;
           border: none;
           border-radius: 12px;
           padding: 14px 48px;
-          font-family: "'Inter', sans-serif";
-          font-size: 16px;
+          font-family: 'Inter', sans-serif;
+          font-size: 15px;
           font-weight: 600;
           cursor: pointer;
-          transition: all 0.2s;
-          box-shadow: 0 4px 16px ${SUCCESS}33;
+          transition: all 0.22s;
+          box-shadow: 0 4px 20px rgba(107,122,0,0.25);
         }
 
         .continue-button:hover {
           background: #e4ee8c;
-          transform: translateY(-1px);
-          box-shadow: 0 6px 20px ${SUCCESS}47;
+          transform: translateY(-2px);
+          box-shadow: 0 8px 28px rgba(107,122,0,0.32);
         }
 
         @keyframes fadeIn {
           from {
             opacity: 0;
-            transform: translateY(20px);
+            transform: translateY(10px);
           }
           to {
             opacity: 1;
             transform: translateY(0);
+          }
+        }
+
+        /* Responsive Design */
+        @media (max-width: 968px) {
+          .content-grid {
+            grid-template-columns: 1fr;
+            gap: 32px;
+          }
+
+          .circle-container {
+            width: 240px;
+            height: 240px;
+          }
+
+          .score-display {
+            font-size: 56px;
+          }
+        }
+
+        @media (max-width: 640px) {
+          .container {
+            padding: 20px;
+          }
+
+          .unified-card {
+            padding: 32px 24px;
+          }
+
+          .title {
+            font-size: 26px;
+            margin-bottom: 32px;
+          }
+
+          .content-grid {
+            gap: 28px;
+            margin-bottom: 32px;
+          }
+
+          .circle-container {
+            width: 200px;
+            height: 200px;
+          }
+
+          .score-display {
+            font-size: 48px;
+          }
+
+          .continue-button {
+            width: 100%;
+            max-width: 320px;
           }
         }
       `}</style>

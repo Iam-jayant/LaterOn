@@ -4,13 +4,8 @@ import React, { useState, useEffect } from "react";
 import { useWallet } from "@/hooks/useWallet";
 import { useTransactionSigner } from "@/hooks/useTransactionSigner";
 import { SigningModal } from "@/components/signing-modal";
-import { decodeUnsignedTransactions } from "@/lib/transaction-signer";
 
 const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
-
-// ============================================================================
-// Type Definitions
-// ============================================================================
 
 interface GiftCardCheckoutModalProps {
   isOpen: boolean;
@@ -43,25 +38,8 @@ interface GiftCardDetails {
   expiresAt?: string;
 }
 
-type CheckoutStep = "quote" | "wallet" | "success" | "error";
+type CheckoutStep = "quote" | "wallet" | "processing" | "success" | "error";
 
-// ============================================================================
-// GiftCardCheckoutModal Component
-// ============================================================================
-
-/**
- * Comprehensive checkout modal for gift card purchases with BNPL.
- * 
- * Features:
- * - Displays payment breakdown (INR and ALGO)
- * - Shows 3-month installment schedule
- * - Wallet connection button
- * - Transaction approval UI
- * - Gift card code and PIN display after purchase
- * - Copy buttons for code and PIN
- * 
- * Requirements: 5.2, 5.3, 5.7, 6.1, 6.5, 6.6, 7.3, 7.4
- */
 export function GiftCardCheckoutModal({
   isOpen,
   productName,
@@ -72,7 +50,7 @@ export function GiftCardCheckoutModal({
   onSuccess
 }: GiftCardCheckoutModalProps) {
   const { address, connect } = useWallet();
-  const { signAndSubmitTransactions, signingStatus, txId, error: signingError, isModalOpen: isSigningModalOpen, closeModal } = useTransactionSigner();
+  const { signingStatus, txId, error: signingError, isModalOpen: isSigningModalOpen, closeModal } = useTransactionSigner();
   
   const [step, setStep] = useState<CheckoutStep>("quote");
   const [quote, setQuote] = useState<MarketplaceQuote | null>(null);
@@ -81,9 +59,8 @@ export function GiftCardCheckoutModal({
   const [dots, setDots] = useState("");
   const [copiedField, setCopiedField] = useState<"code" | "pin" | null>(null);
 
-  // Animated dots for loading states
   useEffect(() => {
-    if (step === "quote") {
+    if (step === "quote" || step === "processing") {
       const interval = setInterval(() => {
         setDots((prev) => (prev.length >= 3 ? "" : prev + "."));
       }, 500);
@@ -91,7 +68,6 @@ export function GiftCardCheckoutModal({
     }
   }, [step]);
 
-  // Create quote when modal opens (Requirement 5.2, 5.3)
   useEffect(() => {
     if (isOpen && address && !quote) {
       void createQuote();
@@ -115,8 +91,6 @@ export function GiftCardCheckoutModal({
 
       if (!response.ok) {
         const errorData = await response.json() as { error?: { message?: string; code?: string } };
-        
-        // Display descriptive error messages (Requirement 3.6)
         throw new Error(errorData.error?.message || "Failed to create quote");
       }
 
@@ -127,8 +101,6 @@ export function GiftCardCheckoutModal({
       const errorMessage = err instanceof Error ? err.message : "Failed to create quote";
       setError(errorMessage);
       setStep("error");
-      
-      // Log error for debugging (Requirement 12.5)
       console.error("Failed to create quote:", errorMessage, err);
     }
   };
@@ -137,12 +109,9 @@ export function GiftCardCheckoutModal({
     try {
       await connect("pera");
     } catch (err) {
-      // Display wallet connection error (Requirement 12.2)
       const errorMessage = err instanceof Error ? err.message : "Failed to connect wallet";
       setError("Wallet connection failed. Please try again.");
       setStep("error");
-      
-      // Log error for debugging (Requirement 12.5)
       console.error("Wallet connection failed:", errorMessage);
     }
   };
@@ -151,10 +120,12 @@ export function GiftCardCheckoutModal({
     if (!quote) return;
 
     setError(null);
+    setStep("processing"); // Show processing state
 
     try {
-      // Step 1: Call backend to prepare unsigned transactions
-      const prepareResponse = await fetch(`${apiBase}/api/marketplace/checkout/prepare`, {
+      console.log("Starting checkout with quoteId:", quote.quoteId);
+      
+      const checkoutResponse = await fetch(`${apiBase}/api/marketplace/checkout`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -162,74 +133,44 @@ export function GiftCardCheckoutModal({
         })
       });
 
-      if (!prepareResponse.ok) {
-        const errorData = await prepareResponse.json() as { error?: { message?: string; code?: string } };
+      console.log("Checkout response status:", checkoutResponse.status);
+
+      if (!checkoutResponse.ok) {
+        const errorData = await checkoutResponse.json() as { error?: { message?: string; code?: string } };
+        console.error("Checkout error response:", errorData);
         
-        // Handle specific error codes with user-friendly messages (Requirements 12.3, 12.4)
         if (errorData.error?.code === "INSUFFICIENT_LIQUIDITY") {
           throw new Error("Insufficient pool liquidity. Please try again later.");
         } else if (errorData.error?.code === "QUOTE_EXPIRED") {
           throw new Error("Quote expired. Please create a new quote.");
-        }
-        
-        throw new Error(errorData.error?.message || "Failed to prepare checkout");
-      }
-
-      const prepareData = await prepareResponse.json() as { transactions: string[] };
-      
-      // Step 2: Decode unsigned transactions
-      const unsignedTransactions = decodeUnsignedTransactions(prepareData.transactions);
-      
-      // Step 3: Sign and submit transactions using the hook
-      // This will open the wallet for signing, submit to blockchain, and wait for confirmation
-      // The SigningModal will display the signing status
-      const result = await signAndSubmitTransactions(unsignedTransactions);
-      
-      // Step 4: Call backend to confirm checkout and fulfill gift card
-      // For now, we'll use the old single-endpoint approach since the backend
-      // confirm endpoint expects to submit transactions itself
-      // TODO: Update backend to accept txId and verify on-chain instead of re-submitting
-      const confirmResponse = await fetch(`${apiBase}/api/marketplace/checkout`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          quoteId: quote.quoteId
-        })
-      });
-
-      if (!confirmResponse.ok) {
-        const errorData = await confirmResponse.json() as { error?: { message?: string; code?: string } };
-        
-        // Handle specific error codes with user-friendly messages (Requirements 12.3, 12.4)
-        if (errorData.error?.code === "QUOTE_EXPIRED") {
-          throw new Error("Quote expired. Please create a new quote.");
         } else if (errorData.error?.code === "FULFILLMENT_FAILED") {
-          // Display fulfillment failure with transaction ID (Requirement 12.4)
           throw new Error(errorData.error.message || "Gift card delivery failed");
         }
         
-        throw new Error(errorData.error?.message || "Failed to confirm checkout");
+        throw new Error(errorData.error?.message || "Checkout failed. Please try again.");
       }
 
-      const confirmData = await confirmResponse.json() as {
+      const checkoutData = await checkoutResponse.json() as {
         success: boolean;
         giftCard: GiftCardDetails;
       };
 
-      if (confirmData.success && confirmData.giftCard) {
-        setGiftCard(confirmData.giftCard);
+      console.log("Checkout response data:", checkoutData);
+
+      if (checkoutData.success && checkoutData.giftCard) {
+        console.log("Setting gift card and success state");
+        setGiftCard(checkoutData.giftCard);
         setStep("success");
-        onSuccess?.(confirmData.giftCard);
+        onSuccess?.(checkoutData.giftCard);
       } else {
+        console.error("Invalid checkout response structure:", checkoutData);
         throw new Error("Invalid checkout response");
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Checkout failed";
+      console.error("Checkout failed with error:", errorMessage, err);
       setError(errorMessage);
       setStep("error");
-      
-      // Log error for debugging (Requirement 12.5)
-      console.error("Checkout failed:", errorMessage, err);
     }
   };
 
@@ -256,61 +197,270 @@ export function GiftCardCheckoutModal({
   const canClose = step === "success" || step === "error";
 
   return (
-    <div className="modal-overlay" onClick={canClose ? handleClose : undefined}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+    <div 
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        background: 'rgba(0, 0, 0, 0.7)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 1000,
+        backdropFilter: 'blur(4px)',
+        padding: '16px'
+      }}
+      onClick={canClose ? handleClose : undefined}
+    >
+      <div 
+        style={{
+          background: 'var(--background)',
+          borderRadius: '16px',
+          padding: '32px',
+          maxWidth: '500px',
+          width: '100%',
+          maxHeight: '90vh',
+          overflowY: 'auto',
+          boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)',
+          textAlign: 'center'
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Quote Loading */}
         {step === "quote" && (
           <>
-            <div className="modal-icon">⏳</div>
-            <h2 className="modal-title">
-              Creating quote<span className="dots">{dots}</span>
+            <div style={{ fontSize: '64px', marginBottom: '16px' }}>⏳</div>
+            <h2 style={{ 
+              fontSize: '24px', 
+              fontWeight: 600, 
+              margin: '0 0 12px 0', 
+              color: 'var(--foreground)',
+              fontFamily: 'var(--font-heading)' 
+            }}>
+              Creating quote<span style={{ display: 'inline-block', width: '20px', textAlign: 'left' }}>{dots}</span>
             </h2>
-            <p className="modal-message">Please wait while we prepare your payment details</p>
+            <p style={{ 
+              fontSize: '16px', 
+              color: 'var(--muted)', 
+              margin: '0 0 24px 0', 
+              lineHeight: 1.5,
+              fontFamily: 'var(--font-sans)' 
+            }}>
+              Please wait while we prepare your payment details
+            </p>
           </>
         )}
 
-        {/* Wallet Connection & Payment Breakdown (Requirement 5.7, 6.1) */}
         {step === "wallet" && quote && (
           <>
-            <div className="modal-icon">💳</div>
-            <h2 className="modal-title">Checkout</h2>
+            {/* Professional Shopping Bag Icon */}
+            <div style={{ 
+              width: '64px',
+              height: '64px',
+              margin: '0 auto 16px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'rgba(107,122,0,0.1)',
+              borderRadius: '50%'
+            }}>
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#6b7a00" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/>
+                <line x1="3" y1="6" x2="21" y2="6"/>
+                <path d="M16 10a4 4 0 0 1-8 0"/>
+              </svg>
+            </div>
+            <h2 style={{ 
+              fontSize: '24px', 
+              fontWeight: 600, 
+              margin: '0 0 12px 0', 
+              color: 'var(--foreground)',
+              fontFamily: 'var(--font-heading)' 
+            }}>
+              Checkout
+            </h2>
             
             <div style={{ textAlign: "left", marginBottom: "24px" }}>
-              <p style={{ margin: "0 0 8px", fontWeight: 600, fontSize: "16px" }}>
+              <p style={{ margin: "0 0 8px", fontWeight: 600, fontSize: "16px", fontFamily: "var(--font-heading)" }}>
                 {brandName} - ₹{denomination}
               </p>
-              <p style={{ margin: 0, fontSize: "14px", color: "var(--muted)" }}>
+              <p style={{ margin: 0, fontSize: "14px", color: "var(--muted)", fontFamily: "var(--font-sans)" }}>
                 {productName}
               </p>
             </div>
 
-            {/* Payment Breakdown (Requirement 5.3, 5.7) */}
+            <div
+              style={{
+                border: "1px solid rgba(107,122,0,0.2)",
+                borderRadius: "12px",
+                padding: "16px",
+                marginBottom: "24px",
+                backgroundColor: "rgba(107,122,0,0.08)",
+                textAlign: "left"
+              }}
+            >
+              <p style={{ margin: "0 0 12px", fontWeight: 600, fontSize: "14px", fontFamily: "var(--font-heading)", color: "var(--foreground)" }}>
+                Payment Breakdown
+              </p>
+              
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px" }}>
+                <span style={{ fontSize: "14px", fontFamily: "var(--font-sans)", color: "var(--foreground)" }}>Total Amount:</span>
+                <span style={{ fontSize: "14px", fontWeight: 500, fontFamily: "var(--font-sans)", color: "var(--foreground)" }}>
+                  ₹{quote.orderAmountInr} ({quote.orderAmountAlgo.toFixed(2)} ALGO)
+                </span>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px" }}>
+                <span style={{ fontSize: "14px", fontFamily: "var(--font-sans)", color: "var(--foreground)" }}>Per Installment:</span>
+                <span style={{ fontSize: "14px", fontWeight: 500, fontFamily: "var(--font-sans)", color: "var(--foreground)" }}>
+                  ₹{Math.ceil(quote.orderAmountInr / quote.tenureMonths)} ({quote.installmentAmountAlgo.toFixed(2)} ALGO)
+                </span>
+              </div>
+
+              <div
+                style={{
+                  borderTop: "1px solid rgba(107,122,0,0.15)",
+                  marginTop: "12px",
+                  paddingTop: "12px"
+                }}
+              >
+                <p style={{ margin: "0 0 8px", fontSize: "12px", fontWeight: 600, fontFamily: "var(--font-heading)", color: "var(--foreground)" }}>
+                  {quote.tenureMonths}-Month Installment Schedule:
+                </p>
+                <ul style={{ margin: 0, paddingLeft: "20px", fontSize: "12px", fontFamily: "var(--font-sans)", color: "var(--foreground)", opacity: 0.8 }}>
+                  <li>Month 1: ₹{Math.ceil(quote.orderAmountInr / quote.tenureMonths)} (Today)</li>
+                  <li>Month 2: ₹{Math.ceil(quote.orderAmountInr / quote.tenureMonths)}</li>
+                  <li>Month 3: ₹{Math.ceil(quote.orderAmountInr / quote.tenureMonths)}</li>
+                </ul>
+              </div>
+
+              <p style={{ margin: "12px 0 0", fontSize: "11px", color: "var(--foreground)", opacity: 0.7, fontFamily: "var(--font-sans)" }}>
+                Exchange Rate: 1 ALGO = ₹{quote.algoToInrRate.toFixed(2)}
+              </p>
+            </div>
+
             <div
               style={{
                 border: "1px solid var(--border)",
                 borderRadius: "12px",
                 padding: "16px",
                 marginBottom: "24px",
-                backgroundColor: "var(--muted)",
+                backgroundColor: "var(--background)",
                 textAlign: "left"
               }}
             >
-              <p style={{ margin: "0 0 12px", fontWeight: 600, fontSize: "14px" }}>
-                Payment Breakdown
+              <p style={{ margin: "0 0 12px", fontWeight: 600, fontSize: "14px", fontFamily: "var(--font-heading)", color: "var(--foreground)" }}>
+                What happens when you checkout:
               </p>
               
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px" }}>
-                <span style={{ fontSize: "14px" }}>Total Amount:</span>
-                <span style={{ fontSize: "14px", fontWeight: 500 }}>
-                  ₹{quote.orderAmountInr} ({quote.orderAmountAlgo.toFixed(2)} ALGO)
-                </span>
-              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                <div style={{ display: "flex", gap: "12px", alignItems: "flex-start" }}>
+                  <div style={{
+                    width: '24px',
+                    height: '24px',
+                    borderRadius: '50%',
+                    background: '#6b7a00',
+                    color: 'white',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    flexShrink: 0,
+                    fontFamily: 'var(--font-sans)'
+                  }}>
+                    1
+                  </div>
+                  <div>
+                    <p style={{ margin: 0, fontSize: "13px", fontWeight: 500, fontFamily: "var(--font-sans)", color: "var(--foreground)" }}>
+                      You pay first installment
+                    </p>
+                    <p style={{ margin: "4px 0 0", fontSize: "12px", color: "var(--foreground)", opacity: 0.7, fontFamily: "var(--font-sans)" }}>
+                      {quote.installmentAmountAlgo.toFixed(2)} ALGO from your wallet
+                    </p>
+                  </div>
+                </div>
 
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px" }}>
-                <span style={{ fontSize: "14px" }}>Per Installment:</span>
-                <span style={{ fontSize: "14px", fontWeight: 500 }}>
-                  ₹{Math.ceil(quote.orderAmountInr / quote.tenureMonths)} ({quote.installmentAmountAlgo.toFixed(2)} ALGO)
-                </span>
+                <div style={{ display: "flex", gap: "12px", alignItems: "flex-start" }}>
+                  <div style={{
+                    width: '24px',
+                    height: '24px',
+                    borderRadius: '50%',
+                    background: '#6b7a00',
+                    color: 'white',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    flexShrink: 0,
+                    fontFamily: 'var(--font-sans)'
+                  }}>
+                    2
+                  </div>
+                  <div>
+                    <p style={{ margin: 0, fontSize: "13px", fontWeight: 500, fontFamily: "var(--font-sans)", color: "var(--foreground)" }}>
+                      Pool pays remaining amount
+                    </p>
+                    <p style={{ margin: "4px 0 0", fontSize: "12px", color: "var(--foreground)", opacity: 0.7, fontFamily: "var(--font-sans)" }}>
+                      {(quote.orderAmountAlgo - quote.installmentAmountAlgo).toFixed(2)} ALGO from lending pool
+                    </p>
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", gap: "12px", alignItems: "flex-start" }}>
+                  <div style={{
+                    width: '24px',
+                    height: '24px',
+                    borderRadius: '50%',
+                    background: '#6b7a00',
+                    color: 'white',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    flexShrink: 0,
+                    fontFamily: 'var(--font-sans)'
+                  }}>
+                    3
+                  </div>
+                  <div>
+                    <p style={{ margin: 0, fontSize: "13px", fontWeight: 500, fontFamily: "var(--font-sans)", color: "var(--foreground)" }}>
+                      Merchant receives full payment
+                    </p>
+                    <p style={{ margin: "4px 0 0", fontSize: "12px", color: "var(--foreground)", opacity: 0.7, fontFamily: "var(--font-sans)" }}>
+                      {quote.orderAmountAlgo.toFixed(2)} ALGO sent to merchant
+                    </p>
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", gap: "12px", alignItems: "flex-start" }}>
+                  <div style={{
+                    width: '24px',
+                    height: '24px',
+                    borderRadius: '50%',
+                    background: '#D7E377',
+                    color: '#0A0C12',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '16px',
+                    flexShrink: 0
+                  }}>
+                    🎁
+                  </div>
+                  <div>
+                    <p style={{ margin: 0, fontSize: "13px", fontWeight: 500, fontFamily: "var(--font-sans)", color: "var(--foreground)" }}>
+                      You receive gift card instantly
+                    </p>
+                    <p style={{ margin: "4px 0 0", fontSize: "12px", color: "var(--foreground)", opacity: 0.7, fontFamily: "var(--font-sans)" }}>
+                      Code and PIN delivered after confirmation
+                    </p>
+                  </div>
+                </div>
               </div>
 
               <div
@@ -320,53 +470,127 @@ export function GiftCardCheckoutModal({
                   paddingTop: "12px"
                 }}
               >
-                <p style={{ margin: "0 0 8px", fontSize: "12px", fontWeight: 600 }}>
-                  {quote.tenureMonths}-Month Installment Schedule:
+                <p style={{ margin: 0, fontSize: "11px", color: "var(--foreground)", opacity: 0.7, fontFamily: "var(--font-sans)" }}>
+                  ⚡ All transactions happen atomically in a single blockchain operation
                 </p>
-                <ul style={{ margin: 0, paddingLeft: "20px", fontSize: "12px" }}>
-                  <li>Month 1: ₹{Math.ceil(quote.orderAmountInr / quote.tenureMonths)} (Today)</li>
-                  <li>Month 2: ₹{Math.ceil(quote.orderAmountInr / quote.tenureMonths)}</li>
-                  <li>Month 3: ₹{Math.ceil(quote.orderAmountInr / quote.tenureMonths)}</li>
-                </ul>
               </div>
-
-              <p style={{ margin: "12px 0 0", fontSize: "11px", color: "var(--muted)" }}>
-                Exchange Rate: 1 ALGO = ₹{quote.algoToInrRate.toFixed(2)}
-              </p>
             </div>
 
-            {/* Wallet Connection Button (Requirement 6.1) */}
             {!address ? (
-              <button onClick={handleWalletConnect} className="modal-action-button">
+              <button 
+                onClick={handleWalletConnect} 
+                style={{
+                  background: 'var(--primary)',
+                  color: 'var(--background)',
+                  border: 'none',
+                  borderRadius: '8px',
+                  padding: '12px 32px',
+                  fontSize: '16px',
+                  fontWeight: 500,
+                  fontFamily: 'var(--font-sans)',
+                  cursor: 'pointer',
+                  width: '100%',
+                  marginBottom: '8px',
+                  minHeight: '44px'
+                }}
+              >
                 Connect Wallet
               </button>
             ) : (
               <>
-                <p style={{ fontSize: "12px", color: "var(--muted)", marginBottom: "16px" }}>
+                <p style={{ fontSize: "13px", color: "var(--foreground)", opacity: 0.7, marginBottom: "16px", fontFamily: "var(--font-sans)" }}>
                   Connected: {address.slice(0, 6)}...{address.slice(-4)}
                 </p>
-                <button onClick={handleCheckout} className="modal-action-button">
-                  Buy
+                <button 
+                  onClick={handleCheckout} 
+                  style={{
+                    background: 'var(--primary)',
+                    color: 'var(--background)',
+                    border: 'none',
+                    borderRadius: '8px',
+                    padding: '12px 32px',
+                    fontSize: '16px',
+                    fontWeight: 500,
+                    fontFamily: 'var(--font-sans)',
+                    cursor: 'pointer',
+                    width: '100%',
+                    marginBottom: '8px',
+                    minHeight: '44px'
+                  }}
+                >
+                  Buy Now - Pay in 3
                 </button>
               </>
             )}
 
-            <button onClick={handleClose} className="modal-cancel-button">
+            <button 
+              onClick={handleClose} 
+              style={{
+                background: 'transparent',
+                color: 'var(--muted)',
+                border: '1px solid var(--border)',
+                borderRadius: '8px',
+                padding: '12px 32px',
+                fontSize: '16px',
+                fontWeight: 500,
+                fontFamily: 'var(--font-sans)',
+                cursor: 'pointer',
+                width: '100%',
+                minHeight: '44px'
+              }}
+            >
               Cancel
             </button>
           </>
         )}
 
-        {/* Success - Display Gift Card (Requirement 7.3, 7.4) */}
+        {/* Processing State */}
+        {step === "processing" && (
+          <>
+            <div style={{ fontSize: '64px', marginBottom: '16px' }}>⏳</div>
+            <h2 style={{ 
+              fontSize: '24px', 
+              fontWeight: 600, 
+              margin: '0 0 12px 0', 
+              color: 'var(--foreground)',
+              fontFamily: 'var(--font-heading)' 
+            }}>
+              Processing payment<span style={{ display: 'inline-block', width: '20px', textAlign: 'left' }}>{dots}</span>
+            </h2>
+            <p style={{ 
+              fontSize: '16px', 
+              color: 'var(--muted)', 
+              margin: '0 0 24px 0', 
+              lineHeight: 1.5,
+              fontFamily: 'var(--font-sans)' 
+            }}>
+              Please wait while we process your purchase and deliver your gift card
+            </p>
+          </>
+        )}
+
         {step === "success" && giftCard && (
           <>
-            <div className="modal-icon">✅</div>
-            <h2 className="modal-title">Purchase Complete!</h2>
-            <p className="modal-message" style={{ marginBottom: "24px" }}>
+            <div style={{ fontSize: '64px', marginBottom: '16px' }}>✅</div>
+            <h2 style={{ 
+              fontSize: '24px', 
+              fontWeight: 600, 
+              margin: '0 0 12px 0', 
+              color: 'var(--foreground)',
+              fontFamily: 'var(--font-heading)' 
+            }}>
+              Purchase Complete!
+            </h2>
+            <p style={{ 
+              fontSize: '16px', 
+              color: 'var(--muted)', 
+              margin: '0 0 24px 0', 
+              lineHeight: 1.5,
+              fontFamily: 'var(--font-sans)' 
+            }}>
               Your {brandName} gift card is ready
             </p>
 
-            {/* Gift Card Details with Copy Buttons (Requirement 7.3, 7.4) */}
             <div
               style={{
                 border: "1px solid var(--border)",
@@ -379,7 +603,7 @@ export function GiftCardCheckoutModal({
             >
               <div style={{ marginBottom: "16px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <label style={{ fontSize: "12px", fontWeight: 600, display: "block", marginBottom: "4px" }}>
+                  <label style={{ fontSize: "12px", fontWeight: 600, display: "block", marginBottom: "4px", fontFamily: "var(--font-heading)" }}>
                     Gift Card Code:
                   </label>
                   <button
@@ -387,6 +611,7 @@ export function GiftCardCheckoutModal({
                     style={{
                       padding: "8px 16px",
                       fontSize: "12px",
+                      fontFamily: "var(--font-sans)",
                       border: "1px solid var(--border)",
                       borderRadius: "6px",
                       background: "var(--background)",
@@ -414,7 +639,7 @@ export function GiftCardCheckoutModal({
 
               <div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <label style={{ fontSize: "12px", fontWeight: 600, display: "block", marginBottom: "4px" }}>
+                  <label style={{ fontSize: "12px", fontWeight: 600, display: "block", marginBottom: "4px", fontFamily: "var(--font-heading)" }}>
                     PIN:
                   </label>
                   <button
@@ -422,6 +647,7 @@ export function GiftCardCheckoutModal({
                     style={{
                       padding: "8px 16px",
                       fontSize: "12px",
+                      fontFamily: "var(--font-sans)",
                       border: "1px solid var(--border)",
                       borderRadius: "6px",
                       background: "var(--background)",
@@ -447,50 +673,105 @@ export function GiftCardCheckoutModal({
               </div>
 
               {giftCard.expiresAt && (
-                <p style={{ margin: "12px 0 0", fontSize: "11px", color: "var(--muted)" }}>
+                <p style={{ margin: "12px 0 0", fontSize: "11px", color: "var(--muted)", fontFamily: "var(--font-sans)" }}>
                   Expires: {new Date(giftCard.expiresAt).toLocaleDateString()}
                 </p>
               )}
             </div>
 
-            <p style={{ fontSize: "12px", color: "var(--muted)", marginBottom: "16px" }}>
+            <p style={{ fontSize: "12px", color: "var(--muted)", marginBottom: "16px", fontFamily: "var(--font-sans)" }}>
               Save these details! You can also view them later in your dashboard.
             </p>
 
-            <button onClick={handleClose} className="modal-action-button">
+            <button 
+              onClick={handleClose} 
+              style={{
+                background: 'var(--primary)',
+                color: 'var(--background)',
+                border: 'none',
+                borderRadius: '8px',
+                padding: '12px 32px',
+                fontSize: '16px',
+                fontWeight: 500,
+                fontFamily: 'var(--font-sans)',
+                cursor: 'pointer',
+                width: '100%',
+                minHeight: '44px'
+              }}
+            >
               Done
             </button>
           </>
         )}
 
-        {/* Error State with Retry Option (Requirements 12.2, 12.3, 12.4) */}
         {step === "error" && (
           <>
-            <div className="modal-icon">❌</div>
-            <h2 className="modal-title">Purchase Failed</h2>
-            <p className="modal-message">{error || "An error occurred. Please try again."}</p>
+            <div style={{ fontSize: '64px', marginBottom: '16px' }}>❌</div>
+            <h2 style={{ 
+              fontSize: '24px', 
+              fontWeight: 600, 
+              margin: '0 0 12px 0', 
+              color: 'var(--foreground)',
+              fontFamily: 'var(--font-heading)' 
+            }}>
+              Purchase Failed
+            </h2>
+            <p style={{ 
+              fontSize: '16px', 
+              color: 'var(--muted)', 
+              margin: '0 0 24px 0', 
+              lineHeight: 1.5,
+              fontFamily: 'var(--font-sans)' 
+            }}>
+              {error || "An error occurred. Please try again."}
+            </p>
             
-            {/* Retry button for recoverable errors (Requirement 12.3) */}
             {error && !error.includes("Contact support") && (
               <button 
                 onClick={() => {
                   setStep("wallet");
                   setError(null);
                 }} 
-                className="modal-action-button"
-                style={{ marginBottom: "8px" }}
+                style={{
+                  background: 'var(--primary)',
+                  color: 'var(--background)',
+                  border: 'none',
+                  borderRadius: '8px',
+                  padding: '12px 32px',
+                  fontSize: '16px',
+                  fontWeight: 500,
+                  fontFamily: 'var(--font-sans)',
+                  cursor: 'pointer',
+                  width: '100%',
+                  marginBottom: '8px',
+                  minHeight: '44px'
+                }}
               >
                 Retry
               </button>
             )}
             
-            <button onClick={handleClose} className="modal-cancel-button">
+            <button 
+              onClick={handleClose} 
+              style={{
+                background: 'transparent',
+                color: 'var(--muted)',
+                border: '1px solid var(--border)',
+                borderRadius: '8px',
+                padding: '12px 32px',
+                fontSize: '16px',
+                fontWeight: 500,
+                fontFamily: 'var(--font-sans)',
+                cursor: 'pointer',
+                width: '100%',
+                minHeight: '44px'
+              }}
+            >
               Close
             </button>
           </>
         )}
 
-        {/* SigningModal for transaction signing status (Requirement 2.6, 3.3) */}
         <SigningModal
           isOpen={isSigningModalOpen}
           status={signingStatus}
@@ -498,145 +779,6 @@ export function GiftCardCheckoutModal({
           error={signingError}
           onClose={closeModal}
         />
-
-        <style jsx>{`
-          .modal-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0, 0, 0, 0.7);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 1000;
-            backdrop-filter: blur(4px);
-            padding: 16px;
-          }
-
-          .modal-content {
-            background: var(--background);
-            border-radius: 16px;
-            padding: 32px;
-            max-width: 500px;
-            width: 100%;
-            max-height: 90vh;
-            overflow-y: auto;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-            text-align: center;
-          }
-
-          /* Mobile-friendly modal - Requirement 14.4 */
-          @media (max-width: 640px) {
-            .modal-overlay {
-              padding: 0;
-              align-items: flex-end;
-            }
-
-            .modal-content {
-              border-radius: 16px 16px 0 0;
-              max-height: 95vh;
-              padding: 24px 20px;
-              width: 100%;
-            }
-          }
-
-          .modal-icon {
-            font-size: 64px;
-            margin-bottom: 16px;
-            animation: fadeIn 0.3s ease-in;
-          }
-
-          @media (max-width: 640px) {
-            .modal-icon {
-              font-size: 48px;
-              margin-bottom: 12px;
-            }
-          }
-
-          .modal-title {
-            font-size: 24px;
-            font-weight: 600;
-            margin: 0 0 12px 0;
-            color: var(--foreground);
-          }
-
-          @media (max-width: 640px) {
-            .modal-title {
-              font-size: 20px;
-            }
-          }
-
-          .dots {
-            display: inline-block;
-            width: 20px;
-            text-align: left;
-          }
-
-          .modal-message {
-            font-size: 16px;
-            color: var(--muted);
-            margin: 0 0 24px 0;
-            line-height: 1.5;
-          }
-
-          @media (max-width: 640px) {
-            .modal-message {
-              font-size: 14px;
-            }
-          }
-
-          .modal-action-button {
-            background: var(--primary);
-            color: var(--background);
-            border: none;
-            border-radius: 8px;
-            padding: 12px 32px;
-            font-size: 16px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: opacity 0.2s;
-            width: 100%;
-            margin-bottom: 8px;
-            min-height: 44px;
-            touch-action: manipulation;
-          }
-
-          .modal-action-button:hover {
-            opacity: 0.9;
-          }
-
-          .modal-cancel-button {
-            background: transparent;
-            color: var(--muted);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 12px 32px;
-            font-size: 16px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: background 0.2s;
-            width: 100%;
-            min-height: 44px;
-            touch-action: manipulation;
-          }
-
-          .modal-cancel-button:hover {
-            background: var(--muted);
-          }
-
-          @keyframes fadeIn {
-            from {
-              opacity: 0;
-              transform: scale(0.8);
-            }
-            to {
-              opacity: 1;
-              transform: scale(1);
-            }
-          }
-        `}</style>
       </div>
     </div>
   );

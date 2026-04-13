@@ -364,7 +364,11 @@ export class SupabaseRepository {
    * Update user profile (name and email).
    */
   async updateUserProfile(walletAddress: string, profile: { name?: string; email?: string }): Promise<void> {
+    console.log('Updating profile for wallet:', walletAddress);
+    console.log('Profile data:', { name: profile.name, email: profile.email });
+
     const updates: any = {
+      wallet_address: walletAddress,
       updated_at: new Date().toISOString(),
     };
 
@@ -378,10 +382,14 @@ export class SupabaseRepository {
 
     const { error } = await this.supabase
       .from("users")
-      .update(updates)
-      .eq("wallet_address", walletAddress);
+      .upsert(updates, { onConflict: 'wallet_address' });
 
-    if (error) throw error;
+    if (error) {
+      console.error('Supabase upsert error:', error);
+      throw error;
+    }
+
+    console.log('Profile updated successfully');
   }
 
   /**

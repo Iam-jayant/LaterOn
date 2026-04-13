@@ -11,6 +11,7 @@
   "dependencies": {
     "@hono/node-server": "^1.14.3",
     "@lateron/sdk": "workspace:*",
+    "@supabase/supabase-js": "^2.103.0",
     "algosdk": "^3.5.2",
     "hono": "^4.7.11",
     "pg": "^8.16.3",
