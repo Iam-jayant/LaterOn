@@ -242,6 +242,53 @@ export class SupabaseRepository {
     };
   }
 
+  /**
+   * Get all gift cards for a wallet address.
+   * Joins gift_cards with payment_plans to filter by wallet_address.
+   */
+  async getGiftCardsByWallet(walletAddress: string): Promise<Array<{
+    planId: string;
+    reloadlyTransactionId: number;
+    productId: number;
+    productName: string;
+    denomination: number;
+    code: string;
+    pin: string;
+    purchasedAtUnix: number;
+    expiresAt: string | null;
+  }>> {
+    const { data, error } = await this.supabase
+      .from("gift_cards")
+      .select(`
+        plan_id,
+        reloadly_transaction_id,
+        product_id,
+        product_name,
+        denomination,
+        code,
+        pin,
+        purchased_at_unix,
+        expires_at,
+        payment_plans!inner(wallet_address)
+      `)
+      .eq("payment_plans.wallet_address", walletAddress)
+      .order("purchased_at_unix", { ascending: false });
+
+    if (error) throw error;
+
+    return (data || []).map(row => ({
+      planId: row.plan_id,
+      reloadlyTransactionId: row.reloadly_transaction_id,
+      productId: row.product_id,
+      productName: row.product_name,
+      denomination: row.denomination,
+      code: row.code,
+      pin: row.pin,
+      purchasedAtUnix: row.purchased_at_unix,
+      expiresAt: row.expires_at,
+    }));
+  }
+
   // ============================================================================
   // DPDP Consent and Score ASA Methods
   // ============================================================================

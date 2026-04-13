@@ -127,14 +127,27 @@ export async function waitForConfirmation(
 /**
  * Decodes base64-encoded unsigned transactions from API
  * @param base64Txns - Array of base64-encoded transaction strings
- * @returns Array of decoded Transaction objects
+ * @returns Array of decoded Transaction objects with proper network parameters
  */
 export function decodeUnsignedTransactions(
   base64Txns: string[]
 ): algosdk.Transaction[] {
   return base64Txns.map((base64Txn) => {
     const txnBytes = Buffer.from(base64Txn, "base64");
-    return algosdk.decodeUnsignedTransaction(txnBytes);
+    const txn = algosdk.decodeUnsignedTransaction(txnBytes);
+    
+    // Ensure transaction has network parameters for TestNet
+    // These are required by wallet signing libraries
+    if (!txn.genesisHash) {
+      // TestNet genesis hash (base64)
+      txn.genesisHash = "SGO1GKSzyE7IEPItTxCByw9x8FmnrCDexi9/cOUJOiI=";
+    }
+    if (!txn.genesisID) {
+      // TestNet genesis ID
+      txn.genesisID = "testnet-v1.0";
+    }
+    
+    return txn;
   });
 }
 

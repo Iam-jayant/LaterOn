@@ -352,6 +352,14 @@ export class MarketplaceService {
 
       return unsignedTransactions;
     } catch (error) {
+      // Log detailed error for debugging
+      logger.error("Failed to build unsigned transactions", {
+        quoteId,
+        error: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : undefined,
+        errorDetails: error
+      });
+      
       // If blockchain service is not available, return empty array
       // The confirm step will handle transaction submission
       logger.warn("Blockchain service not available for transaction building, will handle in confirm step", {

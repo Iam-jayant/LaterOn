@@ -365,6 +365,52 @@ export class PostgresRepository {
     };
   }
 
+  /**
+   * Get all gift cards for a wallet address.
+   * Joins gift_cards with payment_plans to filter by wallet_address.
+   */
+  async getGiftCardsByWallet(walletAddress: string): Promise<Array<{
+    planId: string;
+    reloadlyTransactionId: number;
+    productId: number;
+    productName: string;
+    denomination: number;
+    code: string;
+    pin: string;
+    purchasedAtUnix: number;
+    expiresAt: string | null;
+  }>> {
+    const result = await this.pool.query(
+      `SELECT 
+        gc.plan_id,
+        gc.reloadly_transaction_id,
+        gc.product_id,
+        gc.product_name,
+        gc.denomination,
+        gc.code,
+        gc.pin,
+        gc.purchased_at_unix,
+        gc.expires_at
+      FROM gift_cards gc
+      INNER JOIN payment_plans pp ON gc.plan_id = pp.plan_id
+      WHERE pp.wallet_address = $1
+      ORDER BY gc.purchased_at_unix DESC`,
+      [walletAddress]
+    );
+
+    return result.rows.map(row => ({
+      planId: row.plan_id,
+      reloadlyTransactionId: row.reloadly_transaction_id,
+      productId: row.product_id,
+      productName: row.product_name,
+      denomination: row.denomination,
+      code: row.code,
+      pin: row.pin,
+      purchasedAtUnix: row.purchased_at_unix,
+      expiresAt: row.expires_at
+    }));
+  }
+
   // ============================================================================
   // DPDP Consent and Score ASA Methods
   // ============================================================================

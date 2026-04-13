@@ -610,6 +610,78 @@ const registerRecoverScoreASARoute = (app: HonoApp): void => {
   });
 };
 
+/**
+ * GET /api/user/purchases
+ * 
+ * Retrieve all gift card purchases for authenticated user.
+ * Returns gift cards with codes, PINs, and purchase details.
+ * 
+ * Request: None (uses authenticated wallet address)
+ * 
+ * Response:
+ * - purchases: Array of gift card purchase objects
+ *   - planId: Plan ID
+ *   - productName: Gift card product name
+ *   - denomination: Gift card value in INR
+ *   - code: Gift card code
+ *   - pin: Gift card PIN
+ *   - purchasedAt: ISO 8601 timestamp
+ *   - expiresAt: ISO 8601 timestamp (if available)
+ * 
+ * Status Codes:
+ * - 200: Success
+ * - 401: Unauthorized (missing or invalid token)
+ * - 500: Database error
+ */
+const registerPurchasesRoute = (app: HonoApp): void => {
+  app.get("/api/user/purchases", async (c) => {
+    try {
+      // Resolve authenticated wallet address
+      const walletAddress = resolveWalletFromAuth(c);
+
+      logger.info("Retrieving user purchases", { walletAddress });
+
+      // Get all gift card purchases for this wallet
+      const purchases = await c.var.ctx.repository.getGiftCardsByWallet(walletAddress);
+
+      logger.info("User purchases retrieved successfully", {
+        walletAddress,
+        purchaseCount: purchases.length
+      });
+
+      return c.json({
+        purchases: purchases.map(purchase => ({
+          planId: purchase.planId,
+          productName: purchase.productName,
+          denomination: purchase.denomination,
+          code: purchase.code,
+          pin: purchase.pin,
+          purchasedAt: new Date(purchase.purchasedAtUnix * 1000).toISOString(),
+          expiresAt: purchase.expiresAt
+        }))
+      }, 200);
+    } catch (error) {
+      // Re-throw known errors
+      if (error instanceof UnauthorizedError) {
+        throw error;
+      }
+
+      logger.error("Failed to retrieve user purchases", { 
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
+
+      return c.json({
+        error: {
+          code: "PURCHASES_RETRIEVAL_FAILED",
+          message: "Failed to retrieve purchases. Please try again later.",
+          details: null
+        }
+      }, 500);
+    }
+  });
+};
+
 export const registerUserRoutes = (app: HonoApp): void => {
   registerProfileRoute(app);
   registerCreateScoreASARoute(app);
@@ -619,4 +691,5 @@ export const registerUserRoutes = (app: HonoApp): void => {
   registerDataAccessLogRoute(app);
   registerDeleteUserRoute(app);
   registerRecoverScoreASARoute(app);
+  registerPurchasesRoute(app);
 };

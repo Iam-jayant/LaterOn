@@ -143,8 +143,10 @@ export class AlgorandAppService {
     borrowerAddress: string,
     financedAmountAlgo: number
   ): Promise<string[]> {
-    if (!this.enabled) {
-      throw new Error("Blockchain service not enabled");
+    // Marketplace transactions don't need relayer - user signs them
+    // Only check if chain is enabled and app IDs are configured
+    if (!this.config.chainEnabled || this.config.bnplAppId <= 0) {
+      throw new Error("Blockchain service not properly configured");
     }
 
     // Calculate first installment (1/3 of total for 3-month tenure)
@@ -181,7 +183,9 @@ export class AlgorandAppService {
    * @returns Transaction ID of the first transaction in the group
    */
   public async submitSignedTransactions(signedTransactions: string[]): Promise<string> {
-    if (!this.enabled) {
+    // Submitting signed transactions doesn't need relayer - user already signed them
+    // Only check if chain is enabled
+    if (!this.config.chainEnabled) {
       throw new Error("Blockchain service not enabled");
     }
 
