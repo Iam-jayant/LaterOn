@@ -34,10 +34,27 @@ export default function DashboardPage() {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [plans, setPlans] = useState<ApiPlan[]>([]);
   const [upcomingEmis, setUpcomingEmis] = useState<EMI[]>([]);
+  const [purchases, setPurchases] = useState<Array<{
+    planId: string;
+    productName: string;
+    denomination: number;
+    code: string;
+    pin: string;
+    purchasedAt: string;
+    expiresAt: string | null;
+  }>>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showDisconnectMenu, setShowDisconnectMenu] = useState(false);
   const disconnectMenuRef = useRef<HTMLDivElement>(null);
+  const [copiedGiftCard, setCopiedGiftCard] = useState<{ planId: string; field: 'code' | 'pin' } | null>(null);
+  
+  // DPDP section state
+  const [consentData, setConsentData] = useState<{ hasConsent: boolean; txnId: string | null; consentTimestamp: string | null } | null>(null);
+  const [dataAccessLogs, setDataAccessLogs] = useState<Array<{ operation: string; accessedBy: string; accessedAt: string }>>([]);
+  const [userName, setUserName] = useState<string | null>(null);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [scoreAsaId, setScoreAsaId] = useState<number | null>(null);
 
   useEffect(() => {
     const loadDashboardData = async () => {
@@ -70,6 +87,39 @@ export default function DashboardPage() {
 
         setUserProfile(profile);
         setPlans(userPlans);
+        
+        // Fetch gift card purchases
+        try {
+          const userPurchases = await apiClient.getUserPurchases(token);
+          setPurchases(userPurchases);
+        } catch (err) {
+          console.error('Failed to fetch purchases:', err);
+        }
+        
+        // Fetch DPDP data
+        try {
+          const consent = await fetch('/api/consent/check', {
+            headers: { 'Authorization': `Bearer ${token}` }
+          }).then(res => res.json());
+          setConsentData(consent);
+        } catch (err) {
+          console.error('Failed to fetch consent data:', err);
+        }
+
+        try {
+          if (token) {
+            const logs = await apiClient.getDataAccessLog(token);
+            setDataAccessLogs(logs);
+          }
+        } catch (err) {
+          console.error('Failed to fetch data access logs:', err);
+        }
+
+        // Extract user profile data (name, email, score_asa_id)
+        // Note: These fields need to be added to UserProfile type or fetched separately
+        setUserName((profile as any).name || null);
+        setUserEmail((profile as any).email || null);
+        setScoreAsaId((profile as any).scoreAsaId || null);
 
         // Generate EMI list from plans
         const emis: EMI[] = [];
@@ -124,6 +174,45 @@ export default function DashboardPage() {
       window.location.href = '/app/connect';
     } catch (err) {
       console.error('Failed to disconnect wallet:', err);
+    }
+  };
+
+  const handleDeleteData = async () => {
+    const confirmed = window.confirm(
+      'This will permanently delete all your LaterOn data. ' +
+      'Your on-chain transaction history on Algorand cannot be removed. ' +
+      'Continue?'
+    );
+    if (!confirmed) return;
+
+    try {
+      const token = await ensureWalletToken(walletAddress!);
+      const res = await fetch('/api/user/me', { 
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      if (res.ok) {
+        await walletService.disconnect();
+        window.location.href = '/';
+      } else {
+        alert('Deletion failed. Please try again.');
+      }
+    } catch (err) {
+      console.error('Deletion error:', err);
+      alert('Deletion failed. Please try again.');
+    }
+  };
+
+  const handleCopyGiftCard = async (planId: string, field: 'code' | 'pin', value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedGiftCard({ planId, field });
+      setTimeout(() => setCopiedGiftCard(null), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
     }
   };
 
@@ -508,16 +597,45 @@ export default function DashboardPage() {
                               }}
                             />
                           </div>
-                          <p
-                            style={{
-                              fontFamily: "'Inter', sans-serif",
-                              fontSize: '12px',
-                              color: `${TEXT}73`,
-                              margin: '8px 0 0',
-                            }}
-                          >
-                            {progressPercentage}% paid
-                          </p>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px' }}>
+                            <p
+                              style={{
+                                fontFamily: "'Inter', sans-serif",
+                                fontSize: '12px',
+                                color: `${TEXT}73`,
+                                margin: 0,
+                              }}
+                            >
+                              {progressPercentage}% paid
+                            </p>
+                            {plan.status === 'ACTIVE' && plan.remainingAmountAlgo > 0 && (
+                              <button
+                                onClick={() => alert('Pay Now feature coming soon!')}
+                                style={{
+                                  background: PRIMARY,
+                                  border: 'none',
+                                  borderRadius: '8px',
+                                  padding: '8px 16px',
+                                  fontFamily: "'Inter', sans-serif",
+                                  fontSize: '13px',
+                                  fontWeight: 600,
+                                  color: TEXT,
+                                  cursor: 'pointer',
+                                  transition: 'all 0.2s',
+                                }}
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.background = '#e4ee8c';
+                                  e.currentTarget.style.transform = 'translateY(-1px)';
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.background = PRIMARY;
+                                  e.currentTarget.style.transform = 'translateY(0)';
+                                }}
+                              >
+                                Pay Now
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
                     );
@@ -680,6 +798,168 @@ export default function DashboardPage() {
               </section>
             )}
 
+            {/* My Gift Cards Section */}
+            {purchases.length > 0 && (
+              <section>
+                <h2
+                  style={{
+                    fontFamily: "'Space Grotesk', sans-serif",
+                    fontSize: '20px',
+                    fontWeight: 600,
+                    color: TEXT,
+                    margin: '0 0 16px',
+                    letterSpacing: '-0.3px',
+                  }}
+                >
+                  My Gift Cards
+                </h2>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {purchases.map((purchase) => (
+                    <div
+                      key={purchase.planId}
+                      style={{
+                        background: '#FFFFFF',
+                        borderRadius: '16px',
+                        padding: '24px',
+                        border: `1px solid ${TEXT}14`,
+                        boxShadow: '0 4px 16px rgba(10,12,18,0.06)',
+                      }}
+                    >
+                      <div style={{ marginBottom: '20px' }}>
+                        <h3
+                          style={{
+                            fontFamily: "'Space Grotesk', sans-serif",
+                            fontSize: '18px',
+                            fontWeight: 600,
+                            color: TEXT,
+                            margin: '0 0 4px',
+                            letterSpacing: '-0.2px',
+                          }}
+                        >
+                          {purchase.productName}
+                        </h3>
+                        <p
+                          style={{
+                            fontFamily: "'Inter', sans-serif",
+                            fontSize: '13px',
+                            color: `${TEXT}80`,
+                            margin: 0,
+                          }}
+                        >
+                          ₹{purchase.denomination} • Purchased {new Date(purchase.purchasedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                        </p>
+                      </div>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                        <div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                            <p
+                              style={{
+                                fontFamily: "'Inter', sans-serif",
+                                fontSize: '13px',
+                                fontWeight: 600,
+                                color: `${TEXT}80`,
+                                margin: 0,
+                              }}
+                            >
+                              Gift Card Code
+                            </p>
+                            <button
+                              onClick={() => handleCopyGiftCard(purchase.planId, 'code', purchase.code)}
+                              style={{
+                                padding: '6px 12px',
+                                fontSize: '12px',
+                                fontFamily: "'Inter', sans-serif",
+                                fontWeight: 500,
+                                border: `1px solid ${TEXT}26`,
+                                borderRadius: '6px',
+                                background: copiedGiftCard?.planId === purchase.planId && copiedGiftCard?.field === 'code' ? SUCCESS : 'transparent',
+                                color: copiedGiftCard?.planId === purchase.planId && copiedGiftCard?.field === 'code' ? '#FFFFFF' : TEXT,
+                                cursor: 'pointer',
+                                transition: 'all 0.2s',
+                              }}
+                            >
+                              {copiedGiftCard?.planId === purchase.planId && copiedGiftCard?.field === 'code' ? '✓ Copied' : 'Copy'}
+                            </button>
+                          </div>
+                          <p
+                            style={{
+                              fontFamily: "'Space Grotesk', monospace",
+                              fontSize: '16px',
+                              fontWeight: 600,
+                              color: TEXT,
+                              margin: 0,
+                              wordBreak: 'break-all',
+                            }}
+                          >
+                            {purchase.code}
+                          </p>
+                        </div>
+
+                        <div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                            <p
+                              style={{
+                                fontFamily: "'Inter', sans-serif",
+                                fontSize: '13px',
+                                fontWeight: 600,
+                                color: `${TEXT}80`,
+                                margin: 0,
+                              }}
+                            >
+                              PIN
+                            </p>
+                            <button
+                              onClick={() => handleCopyGiftCard(purchase.planId, 'pin', purchase.pin)}
+                              style={{
+                                padding: '6px 12px',
+                                fontSize: '12px',
+                                fontFamily: "'Inter', sans-serif",
+                                fontWeight: 500,
+                                border: `1px solid ${TEXT}26`,
+                                borderRadius: '6px',
+                                background: copiedGiftCard?.planId === purchase.planId && copiedGiftCard?.field === 'pin' ? SUCCESS : 'transparent',
+                                color: copiedGiftCard?.planId === purchase.planId && copiedGiftCard?.field === 'pin' ? '#FFFFFF' : TEXT,
+                                cursor: 'pointer',
+                                transition: 'all 0.2s',
+                              }}
+                            >
+                              {copiedGiftCard?.planId === purchase.planId && copiedGiftCard?.field === 'pin' ? '✓ Copied' : 'Copy'}
+                            </button>
+                          </div>
+                          <p
+                            style={{
+                              fontFamily: "'Space Grotesk', monospace",
+                              fontSize: '16px',
+                              fontWeight: 600,
+                              color: TEXT,
+                              margin: 0,
+                            }}
+                          >
+                            {purchase.pin}
+                          </p>
+                        </div>
+                      </div>
+
+                      {purchase.expiresAt && (
+                        <p
+                          style={{
+                            fontFamily: "'Inter', sans-serif",
+                            fontSize: '12px',
+                            color: `${TEXT}66`,
+                            margin: '16px 0 0',
+                          }}
+                        >
+                          Expires: {new Date(purchase.expiresAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
             {/* CTA Section */}
             {hasPlans && (
               <button
@@ -711,6 +991,370 @@ export default function DashboardPage() {
                 Start a new purchase
               </button>
             )}
+
+            {/* DPDP Section A - On-Chain Data */}
+            <section>
+              <h2
+                style={{
+                  fontFamily: "'Space Grotesk', sans-serif",
+                  fontSize: '20px',
+                  fontWeight: 600,
+                  color: TEXT,
+                  margin: '0 0 16px',
+                  letterSpacing: '-0.3px',
+                }}
+              >
+                🔗 On-Chain Data (Algorand — Immutable)
+              </h2>
+
+              <div
+                style={{
+                  background: '#FFFFFF',
+                  borderRadius: '16px',
+                  padding: '24px',
+                  border: `1px solid ${TEXT}14`,
+                  boxShadow: '0 4px 16px rgba(10,12,18,0.06)',
+                }}
+              >
+                <div style={{ marginBottom: '20px' }}>
+                  <p
+                    style={{
+                      fontFamily: "'Inter', sans-serif",
+                      fontSize: '13px',
+                      fontWeight: 600,
+                      color: `${TEXT}80`,
+                      margin: '0 0 8px',
+                    }}
+                  >
+                    Score ASA ID
+                  </p>
+                  {scoreAsaId ? (
+                    <a
+                      href={`https://testnet.algoexplorer.io/asset/${scoreAsaId}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        fontFamily: "'Space Grotesk', sans-serif",
+                        fontSize: '16px',
+                        fontWeight: 600,
+                        color: PRIMARY,
+                        textDecoration: 'none',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                      }}
+                    >
+                      {scoreAsaId}
+                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                        <path
+                          d="M10.5 7.5v3a1 1 0 01-1 1h-6a1 1 0 01-1-1v-6a1 1 0 011-1h3M8 2.5h4m0 0v4m0-4L6.5 8"
+                          stroke="currentColor"
+                          strokeWidth="1.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </a>
+                  ) : (
+                    <p
+                      style={{
+                        fontFamily: "'Inter', sans-serif",
+                        fontSize: '14px',
+                        color: `${TEXT}66`,
+                        margin: 0,
+                      }}
+                    >
+                      Score ASA not yet minted
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <p
+                    style={{
+                      fontFamily: "'Inter', sans-serif",
+                      fontSize: '13px',
+                      fontWeight: 600,
+                      color: `${TEXT}80`,
+                      margin: '0 0 8px',
+                    }}
+                  >
+                    Consent Transaction
+                  </p>
+                  {consentData?.txnId ? (
+                    <>
+                      <a
+                        href={`https://testnet.algoexplorer.io/tx/${consentData.txnId}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          fontFamily: "'Space Grotesk', sans-serif",
+                          fontSize: '16px',
+                          fontWeight: 600,
+                          color: PRIMARY,
+                          textDecoration: 'none',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          marginBottom: '4px',
+                        }}
+                      >
+                        {consentData.txnId.slice(0, 12)}...
+                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                          <path
+                            d="M10.5 7.5v3a1 1 0 01-1 1h-6a1 1 0 01-1-1v-6a1 1 0 011-1h3M8 2.5h4m0 0v4m0-4L6.5 8"
+                            stroke="currentColor"
+                            strokeWidth="1.5"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      </a>
+                      <p
+                        style={{
+                          fontFamily: "'Inter', sans-serif",
+                          fontSize: '13px',
+                          color: `${TEXT}73`,
+                          margin: 0,
+                        }}
+                      >
+                        {consentData.consentTimestamp ? new Date(consentData.consentTimestamp).toLocaleString() : ''}
+                      </p>
+                    </>
+                  ) : (
+                    <p
+                      style={{
+                        fontFamily: "'Inter', sans-serif",
+                        fontSize: '14px',
+                        color: `${TEXT}66`,
+                        margin: 0,
+                      }}
+                    >
+                      Consent record not found
+                    </p>
+                  )}
+                </div>
+              </div>
+            </section>
+
+            {/* DPDP Section B - Off-Chain Data */}
+            <section>
+              <h2
+                style={{
+                  fontFamily: "'Space Grotesk', sans-serif",
+                  fontSize: '20px',
+                  fontWeight: 600,
+                  color: TEXT,
+                  margin: '0 0 16px',
+                  letterSpacing: '-0.3px',
+                }}
+              >
+                👤 Off-Chain Data (Encrypted — DPDP Protected)
+              </h2>
+
+              <div
+                style={{
+                  background: '#FFFFFF',
+                  borderRadius: '16px',
+                  padding: '24px',
+                  border: `1px solid ${TEXT}14`,
+                  boxShadow: '0 4px 16px rgba(10,12,18,0.06)',
+                }}
+              >
+                <div style={{ marginBottom: '16px' }}>
+                  <p
+                    style={{
+                      fontFamily: "'Inter', sans-serif",
+                      fontSize: '13px',
+                      fontWeight: 600,
+                      color: `${TEXT}80`,
+                      margin: '0 0 6px',
+                    }}
+                  >
+                    Name
+                  </p>
+                  <p
+                    style={{
+                      fontFamily: "'Space Grotesk', sans-serif",
+                      fontSize: '16px',
+                      color: TEXT,
+                      margin: 0,
+                    }}
+                  >
+                    {userName ? `${userName.slice(0, 2)}******` : 'Not set'}
+                  </p>
+                </div>
+
+                <div style={{ marginBottom: '20px' }}>
+                  <p
+                    style={{
+                      fontFamily: "'Inter', sans-serif",
+                      fontSize: '13px',
+                      fontWeight: 600,
+                      color: `${TEXT}80`,
+                      margin: '0 0 6px',
+                    }}
+                  >
+                    Email
+                  </p>
+                  <p
+                    style={{
+                      fontFamily: "'Space Grotesk', sans-serif",
+                      fontSize: '16px',
+                      color: TEXT,
+                      margin: 0,
+                    }}
+                  >
+                    {userEmail ? `${userEmail.charAt(0)}*****@${userEmail.split('@')[1]}` : 'Not set'}
+                  </p>
+                </div>
+
+                <button
+                  onClick={handleDeleteData}
+                  style={{
+                    background: '#EF4444',
+                    color: '#FFFFFF',
+                    border: 'none',
+                    borderRadius: '10px',
+                    padding: '12px 20px',
+                    fontFamily: "'Inter', sans-serif",
+                    fontSize: '14px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = '#DC2626';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = '#EF4444';
+                  }}
+                >
+                  Request Data Deletion
+                </button>
+              </div>
+            </section>
+
+            {/* DPDP Section C - Data Access History */}
+            <section>
+              <h2
+                style={{
+                  fontFamily: "'Space Grotesk', sans-serif",
+                  fontSize: '20px',
+                  fontWeight: 600,
+                  color: TEXT,
+                  margin: '0 0 16px',
+                  letterSpacing: '-0.3px',
+                }}
+              >
+                📋 Data Access History
+              </h2>
+
+              <div
+                style={{
+                  background: '#FFFFFF',
+                  borderRadius: '16px',
+                  padding: '24px',
+                  border: `1px solid ${TEXT}14`,
+                  boxShadow: '0 4px 16px rgba(10,12,18,0.06)',
+                }}
+              >
+                {dataAccessLogs.length > 0 ? (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ borderBottom: `2px solid ${TEXT}14` }}>
+                          <th
+                            style={{
+                              fontFamily: "'Inter', sans-serif",
+                              fontSize: '13px',
+                              fontWeight: 600,
+                              color: `${TEXT}80`,
+                              textAlign: 'left',
+                              padding: '12px 8px',
+                            }}
+                          >
+                            Operation
+                          </th>
+                          <th
+                            style={{
+                              fontFamily: "'Inter', sans-serif",
+                              fontSize: '13px',
+                              fontWeight: 600,
+                              color: `${TEXT}80`,
+                              textAlign: 'left',
+                              padding: '12px 8px',
+                            }}
+                          >
+                            Accessed By
+                          </th>
+                          <th
+                            style={{
+                              fontFamily: "'Inter', sans-serif",
+                              fontSize: '13px',
+                              fontWeight: 600,
+                              color: `${TEXT}80`,
+                              textAlign: 'left',
+                              padding: '12px 8px',
+                            }}
+                          >
+                            Date
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dataAccessLogs.map((log, index) => (
+                          <tr key={index} style={{ borderBottom: index < dataAccessLogs.length - 1 ? `1px solid ${TEXT}0D` : 'none' }}>
+                            <td
+                              style={{
+                                fontFamily: "'Inter', sans-serif",
+                                fontSize: '14px',
+                                color: TEXT,
+                                padding: '12px 8px',
+                              }}
+                            >
+                              {log.operation}
+                            </td>
+                            <td
+                              style={{
+                                fontFamily: "'Inter', sans-serif",
+                                fontSize: '14px',
+                                color: TEXT,
+                                padding: '12px 8px',
+                              }}
+                            >
+                              {log.accessedBy}
+                            </td>
+                            <td
+                              style={{
+                                fontFamily: "'Inter', sans-serif",
+                                fontSize: '14px',
+                                color: `${TEXT}80`,
+                                padding: '12px 8px',
+                              }}
+                            >
+                              {new Date(log.accessedAt).toLocaleString()}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p
+                    style={{
+                      fontFamily: "'Inter', sans-serif",
+                      fontSize: '14px',
+                      color: `${TEXT}66`,
+                      textAlign: 'center',
+                      margin: 0,
+                    }}
+                  >
+                    No data access events recorded yet
+                  </p>
+                )}
+              </div>
+            </section>
           </div>
 
           {/* RIGHT SIDE - Capacity Card */}

@@ -75,7 +75,8 @@ export class DatabaseMigrations {
    */
   private async runAdditionalMigrations(client: any): Promise<void> {
     const migrations = [
-      "003_dpdp_consent_score_asa.sql"
+      "003_dpdp_consent_score_asa.sql",
+      "004_add_user_profile_columns.sql"
     ];
 
     for (const migrationFile of migrations) {

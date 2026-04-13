@@ -1,20 +1,34 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { walletService, type WalletType } from '@/lib/wallet';
+import { apiClient } from '@/lib/api';
+import { ensureWalletToken } from '@/lib/auth';
+import { ConsentModal, ScoreReveal, ASAOptIn } from '@/components/onboarding';
 import { PRIMARY, BACKGROUND, TEXT, SUCCESS, ERROR } from '@/lib/colors';
 
-type Step = 'wallet' | 'profile';
+type OnboardingStep = 
+  | 'wallet' 
+  | 'consent' 
+  | 'profile' 
+  | 'score_reveal' 
+  | 'asa_optin';
 
 export default function ConnectPage() {
   const router = useRouter();
-  const [step, setStep] = useState<Step>('wallet');
+  const [step, setStep] = useState<OnboardingStep>('wallet');
   const [walletAddress, setWalletAddress] = useState('');
+  const [fullWalletAddress, setFullWalletAddress] = useState('');
+  const [authToken, setAuthToken] = useState('');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [asaId, setAsaId] = useState<number | null>(null);
+  const [scoreAsaId, setScoreAsaId] = useState<number | null>(null);
+  const [showAsaOptIn, setShowAsaOptIn] = useState(false);
+  const [asaError, setAsaError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -26,7 +40,35 @@ export default function ConnectPage() {
       const address = await walletService.connect(walletType);
       const shortAddress = `${address.slice(0, 6)}...${address.slice(-6)}`;
       setWalletAddress(shortAddress);
-      setStep('profile');
+      setFullWalletAddress(address);
+
+      // Check if user exists
+      const { exists } = await apiClient.checkUserExists(address);
+      
+      if (exists) {
+        // Existing user - skip onboarding and go to marketplace
+        router.push('/marketplace');
+      } else {
+        // New user - check if consent already given
+        try {
+          const token = await ensureWalletToken(address);
+          if (token) {
+            const hasConsent = await apiClient.checkConsent(token, 'credit_scoring');
+            if (hasConsent) {
+              // Consent already given, skip to profile
+              setAuthToken(token);
+              setStep('profile');
+              return;
+            }
+          }
+        } catch (err) {
+          // If consent check fails, proceed to consent step
+          console.log('Consent check failed, showing consent modal');
+        }
+        
+        // No consent yet - start onboarding with consent
+        setStep('consent');
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to connect wallet');
     } finally {
@@ -34,15 +76,239 @@ export default function ConnectPage() {
     }
   };
 
+  const handleConsentGiven = async (txnId: string) => {
+    setIsSubmitting(true);
+    setError(null);
+
+    try {
+      // Save consent record
+      await apiClient.saveConsent({
+        walletAddress: fullWalletAddress,
+        purpose: 'credit_scoring',
+        txnId,
+      });
+
+      // Move to profile step
+      setStep('profile');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save consent');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleConsentDecline = async () => {
+    // Disconnect wallet and navigate to landing
+    await walletService.disconnect();
+    router.push('/');
+  };
+
   const handleProfileSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setIsSubmitting(true);
+    setError(null);
     
-    // Simulate profile creation
-    setTimeout(() => {
-      router.push('/marketplace');
-    }, 800);
+    try {
+      // Get auth token for wallet analysis
+      const token = await ensureWalletToken(fullWalletAddress);
+      if (!token) {
+        throw new Error('Failed to authenticate');
+      }
+      setAuthToken(token);
+
+      // Save profile to backend (name and email are now required)
+      try {
+        const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
+        const res = await fetch(`${apiBase}/api/user/profile`, {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ name, email, walletAddress: fullWalletAddress })
+        });
+        
+        if (!res.ok) {
+          const errorText = await res.text();
+          console.error('Failed to save profile:', errorText);
+          throw new Error('Failed to save profile');
+        } else {
+          console.log('Profile saved successfully');
+        }
+      } catch (err) {
+        console.error('Profile save error:', err);
+        setError('Failed to save profile. Please try again.');
+        setIsSubmitting(false);
+        return;
+      }
+
+      // Move to score reveal step
+      setStep('score_reveal');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to submit profile');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
+
+  const navigateToMarketplace = () => {
+    router.push('/marketplace');
+  };
+
+  const handleScoreRevealComplete = async () => {
+    console.log('[ScoreReveal] Continue button clicked, starting ASA creation flow');
+    console.log('[ScoreReveal] Auth token:', authToken ? 'present' : 'missing');
+    
+    try {
+      // Step 1: Create Score ASA on backend
+      console.log('[ScoreReveal] Step 1: Calling /api/user/create-score-asa');
+      const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
+      const createRes = await fetch(`${apiBase}/api/user/create-score-asa`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`
+        }
+      });
+
+      console.log('[ScoreReveal] Create ASA response status:', createRes.status);
+
+      if (!createRes.ok) {
+        const errorText = await createRes.text();
+        console.error('[ScoreReveal] ASA creation failed:', errorText);
+        // Non-blocking: log and go to marketplace
+        navigateToMarketplace();
+        return;
+      }
+
+      const { asaId } = await createRes.json();
+      console.log('[ScoreReveal] ASA created successfully, ID:', asaId);
+      setScoreAsaId(asaId);
+
+      // Step 2: Check wallet balance
+      console.log('[ScoreReveal] Step 2: Checking wallet balance');
+      const balRes = await fetch(`${apiBase}/api/user/wallet-balance`, {
+        headers: {
+          'Authorization': `Bearer ${authToken}`
+        }
+      });
+      const { balance } = await balRes.json();
+      console.log('[ScoreReveal] Wallet balance:', balance, 'ALGO');
+
+      if (balance < 0.1) {
+        console.warn('[ScoreReveal] Insufficient balance for ASA opt-in');
+        setAsaError('Add at least 0.1 ALGO to your wallet to receive your Score token');
+        // Show error but allow user to retry or skip
+        setShowAsaOptIn(false);
+        return;
+      }
+
+      // Step 3: Show ASA opt-in component
+      console.log('[ScoreReveal] Step 3: Showing ASA opt-in modal');
+      setShowAsaOptIn(true);
+      setStep('asa_optin');
+    } catch (err) {
+      console.error('[ScoreReveal] ASA flow error:', err);
+      // Non-blocking: go to marketplace on any error
+      navigateToMarketplace();
+    }
+  };
+
+  const handleOptInConfirmed = async () => {
+    try {
+      await fetch('/api/user/transfer-score-asa', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`
+        },
+        body: JSON.stringify({ asaId: scoreAsaId })
+      });
+    } catch (err) {
+      console.error('ASA transfer failed:', err);
+      // Non-blocking
+    } finally {
+      navigateToMarketplace();
+    }
+  };
+
+  // Render consent modal
+  if (step === 'consent') {
+    return (
+      <ConsentModal
+        walletAddress={fullWalletAddress}
+        onConsent={handleConsentGiven}
+        onDecline={handleConsentDecline}
+      />
+    );
+  }
+
+  // Render score reveal
+  if (step === 'score_reveal') {
+    return (
+      <ScoreReveal
+        authToken={authToken}
+        onComplete={handleScoreRevealComplete}
+      />
+    );
+  }
+
+  // Render ASA opt-in (if ASA ID is available)
+  if (step === 'asa_optin' && scoreAsaId) {
+    return (
+      <>
+        {asaError && (
+          <div style={{ 
+            position: 'fixed', 
+            top: '50%', 
+            left: '50%', 
+            transform: 'translate(-50%, -50%)',
+            background: '#FFFFFF',
+            borderRadius: '16px',
+            padding: '32px',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+            maxWidth: '400px',
+            width: '90%',
+            zIndex: 1000
+          }}>
+            <p style={{ 
+              fontFamily: "'Inter', sans-serif", 
+              fontSize: '15px', 
+              color: ERROR,
+              marginBottom: '16px'
+            }}>
+              {asaError}
+            </p>
+            <button
+              onClick={navigateToMarketplace}
+              style={{
+                width: '100%',
+                background: PRIMARY,
+                border: 'none',
+                borderRadius: '10px',
+                padding: '12px',
+                fontFamily: "'Inter', sans-serif",
+                fontSize: '14px',
+                fontWeight: 600,
+                color: TEXT,
+                cursor: 'pointer'
+              }}
+            >
+              Skip for now
+            </button>
+          </div>
+        )}
+        {!asaError && (
+          <ASAOptIn
+            walletAddress={fullWalletAddress}
+            asaId={scoreAsaId}
+            onComplete={handleOptInConfirmed}
+            onSkip={navigateToMarketplace}
+          />
+        )}
+      </>
+    );
+  }
 
   return (
     <div style={{ minHeight: '100vh', background: BACKGROUND, position: 'relative', overflow: 'hidden' }}>
@@ -270,7 +536,7 @@ export default function ConnectPage() {
                   lineHeight: 1.6,
                 }}
               >
-                Help us personalize your experience (optional)
+                Help us personalize your experience
               </p>
 
               {/* Wallet connected indicator */}
@@ -318,13 +584,14 @@ export default function ConnectPage() {
                       marginBottom: '8px',
                     }}
                   >
-                    Name (optional)
+                    Name <span style={{ color: ERROR }}>*</span>
                   </label>
                   <input
                     type="text"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="Enter your name"
+                    required
                     style={{
                       width: '100%',
                       padding: '12px 16px',
@@ -335,6 +602,11 @@ export default function ConnectPage() {
                       outline: 'none',
                       transition: 'border-color 0.2s',
                       boxSizing: 'border-box',
+                      background: '#FFFFFF',
+                      color: TEXT,
+                      WebkitAppearance: 'none',
+                      MozAppearance: 'none',
+                      appearance: 'none',
                     }}
                     onFocus={(e) => (e.currentTarget.style.borderColor = PRIMARY)}
                     onBlur={(e) => (e.currentTarget.style.borderColor = `${TEXT}1A`)}
@@ -352,13 +624,14 @@ export default function ConnectPage() {
                       marginBottom: '8px',
                     }}
                   >
-                    Email (optional)
+                    Email <span style={{ color: ERROR }}>*</span>
                   </label>
                   <input
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="your@email.com"
+                    required
                     style={{
                       width: '100%',
                       padding: '12px 16px',
@@ -369,6 +642,11 @@ export default function ConnectPage() {
                       outline: 'none',
                       transition: 'border-color 0.2s',
                       boxSizing: 'border-box',
+                      background: '#FFFFFF',
+                      color: TEXT,
+                      WebkitAppearance: 'none',
+                      MozAppearance: 'none',
+                      appearance: 'none',
                     }}
                     onFocus={(e) => (e.currentTarget.style.borderColor = PRIMARY)}
                     onBlur={(e) => (e.currentTarget.style.borderColor = `${TEXT}1A`)}

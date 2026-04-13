@@ -108,22 +108,23 @@ export function ASAOptIn({
             display: flex;
             align-items: center;
             justify-content: center;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #FFFFFF;
           }
 
           .card {
-            background: white;
-            border-radius: 16px;
+            background: #FFFFFF;
+            border: 1px solid rgba(10,12,18,0.07);
+            border-radius: 20px;
             padding: 48px;
             text-align: center;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            box-shadow: 0 4px 16px rgba(10,12,18,0.06);
           }
 
           .spinner {
             width: 48px;
             height: 48px;
-            border: 4px solid #f0f0f0;
-            border-top-color: #667eea;
+            border: 4px solid rgba(10,12,18,0.1);
+            border-top-color: #6b7a00;
             border-radius: 50%;
             animation: spin 1s linear infinite;
             margin: 0 auto 16px;
@@ -136,8 +137,9 @@ export function ASAOptIn({
           }
 
           .card p {
+            font-family: 'Inter', sans-serif;
             font-size: 16px;
-            color: #666;
+            color: rgba(10,12,18,0.6);
             margin: 0;
           }
         `}</style>
@@ -151,7 +153,12 @@ export function ASAOptIn({
     <>
       <div className="container">
         <div className="card">
-          <div className="icon">🏆</div>
+          <div className="icon">
+            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M12 2L13.09 8.26L20 9L13.09 9.74L12 16L10.91 9.74L4 9L10.91 8.26L12 2Z" fill="#6b7a00"/>
+              <path d="M12 16L13.09 22.26L20 23L13.09 23.74L12 30L10.91 23.74L4 23L10.91 22.26L12 16Z" fill="#D7E377"/>
+            </svg>
+          </div>
           <h2 className="title">Receive Your Score Token</h2>
 
           {!hasSufficientBalance ? (
@@ -238,44 +245,50 @@ export function ASAOptIn({
           display: flex;
           align-items: center;
           justify-content: center;
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          background: #FFFFFF;
           padding: 24px;
         }
 
         .card {
-          background: white;
-          border-radius: 16px;
+          background: #FFFFFF;
+          border: 1px solid rgba(10,12,18,0.07);
+          border-radius: 20px;
           padding: 48px;
           max-width: 500px;
           width: 100%;
-          box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+          box-shadow: 0 4px 16px rgba(10,12,18,0.06);
           text-align: center;
         }
 
         .icon {
-          font-size: 64px;
+          display: flex;
+          justify-content: center;
           margin-bottom: 16px;
         }
 
         .title {
+          font-family: 'Space Grotesk', sans-serif;
           font-size: 28px;
-          font-weight: 600;
+          font-weight: 700;
           margin: 0 0 16px 0;
-          color: #1a1a1a;
+          color: #0A0C12;
+          letter-spacing: -0.5px;
         }
 
         .message {
+          font-family: 'Inter', sans-serif;
           font-size: 16px;
           line-height: 1.6;
-          color: #666;
+          color: rgba(10,12,18,0.65);
           margin: 0 0 24px 0;
         }
 
         .balance-info,
         .asa-info {
-          background: #f5f5f5;
-          border-radius: 8px;
-          padding: 16px;
+          background: rgba(10,12,18,0.02);
+          border: 1px solid rgba(10,12,18,0.06);
+          border-radius: 12px;
+          padding: 20px;
           margin-bottom: 16px;
         }
 
@@ -283,8 +296,9 @@ export function ASAOptIn({
         .asa-row {
           display: flex;
           justify-content: space-between;
-          margin-bottom: 8px;
-          font-size: 16px;
+          margin-bottom: 12px;
+          font-family: 'Inter', sans-serif;
+          font-size: 15px;
         }
 
         .balance-row:last-child,
@@ -295,21 +309,24 @@ export function ASAOptIn({
         .balance-value,
         .asa-value {
           font-weight: 600;
-          color: #333;
+          color: #0A0C12;
         }
 
         .note {
+          font-family: 'Inter', sans-serif;
           font-size: 14px;
-          color: #999;
+          color: rgba(10,12,18,0.6);
           line-height: 1.5;
           margin: 0 0 24px 0;
         }
 
         .error-message {
-          background: #fee;
-          color: #c33;
-          padding: 12px;
-          border-radius: 8px;
+          background: rgba(204,0,0,0.05);
+          color: #cc0000;
+          border: 1px solid rgba(204,0,0,0.1);
+          padding: 16px;
+          border-radius: 12px;
+          font-family: 'Inter', sans-serif;
           font-size: 14px;
           margin-bottom: 16px;
         }
@@ -324,42 +341,69 @@ export function ASAOptIn({
         .skip-button {
           flex: 1;
           padding: 14px 24px;
-          font-size: 16px;
-          font-weight: 500;
+          font-family: 'Inter', sans-serif;
+          font-size: 15px;
+          font-weight: 600;
           border: none;
-          border-radius: 8px;
+          border-radius: 12px;
           cursor: pointer;
-          transition: all 0.2s;
+          transition: all 0.22s;
         }
 
         .retry-button,
         .optin-button {
-          background: #0066cc;
-          color: white;
+          background: #D7E377;
+          color: #0A0C12;
+          box-shadow: 0 4px 20px rgba(107,122,0,0.25);
         }
 
         .retry-button:hover,
         .optin-button:hover:not(:disabled) {
-          background: #0052a3;
+          background: #e4ee8c;
+          transform: translateY(-2px);
+          box-shadow: 0 8px 28px rgba(107,122,0,0.32);
         }
 
         .optin-button:disabled {
-          background: #ccc;
+          background: rgba(10,12,18,0.1);
+          color: rgba(10,12,18,0.4);
           cursor: not-allowed;
+          transform: none;
+          box-shadow: none;
         }
 
         .skip-button {
-          background: #f5f5f5;
-          color: #666;
+          background: rgba(10,12,18,0.04);
+          color: rgba(10,12,18,0.65);
+          border: 1px solid rgba(10,12,18,0.1);
         }
 
         .skip-button:hover:not(:disabled) {
-          background: #e0e0e0;
+          background: rgba(10,12,18,0.08);
+          color: #0A0C12;
         }
 
         .skip-button:disabled {
           opacity: 0.5;
           cursor: not-allowed;
+        }
+
+        @media (max-width: 640px) {
+          .container {
+            padding: 20px;
+          }
+
+          .card {
+            padding: 32px 24px;
+          }
+
+          .title {
+            font-size: 24px;
+          }
+
+          .button-group {
+            flex-direction: column;
+          }
         }
       `}</style>
     </>

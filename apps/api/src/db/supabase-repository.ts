@@ -32,6 +32,8 @@ export class SupabaseRepository {
           completed_plans: 0,
           defaults_count: 0,
           total_outstanding_microalgo: 0,
+          email: null,
+          name: null,
           updated_at: new Date().toISOString(),
         },
         { onConflict: "wallet_address" }
