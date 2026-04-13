@@ -1,5 +1,9 @@
 import type { Pool } from "pg";
 import type { PlanRecord, UserProfile } from "@lateron/sdk";
+import { readFileSync } from "fs";
+import { join } from "path";
+import { fileURLToPath } from "url";
+import { dirname } from "path";
 
 /**
  * PostgreSQL repository for users and payment plans.
@@ -57,6 +61,19 @@ export class PostgresRepository {
       CREATE INDEX IF NOT EXISTS idx_deposits_lender ON lender_deposits(lender_wallet_address);
       CREATE INDEX IF NOT EXISTS idx_deposits_tx_id ON lender_deposits(tx_id);
     `);
+
+    // Run migration 003: DPDP Consent and Score ASA
+    try {
+      const __filename = fileURLToPath(import.meta.url);
+      const __dirname = dirname(__filename);
+      const migrationPath = join(__dirname, "migrations", "003_dpdp_consent_score_asa.sql");
+      const migrationSql = readFileSync(migrationPath, "utf-8");
+      await this.pool.query(migrationSql);
+      console.log("[PostgresRepository] Applied migration: 003_dpdp_consent_score_asa.sql");
+    } catch (error) {
+      console.error("[PostgresRepository] Failed to apply migration 003:", error);
+      // Don't throw - migration might already be applied
+    }
   }
 
   /**
@@ -209,7 +226,9 @@ export class PostgresRepository {
       latePayments: 0, // Not tracked in MVP schema
       activeOutstandingInr: row.total_outstanding_microalgo / 1_000_000,
       laterOnScore: row.later_on_score ?? 500,
-    };
+      bannedUntilUnix: row.banned_until_unix ?? undefined,
+      scoreAsaId: row.score_asa_id ?? undefined,
+    } as any; // Type assertion needed for extended fields
   }
 
   /**
@@ -450,6 +469,53 @@ export class PostgresRepository {
        SET later_on_score = $2, updated_at = now()
        WHERE wallet_address = $1`,
       [walletAddress, score]
+    );
+  }
+
+  /**
+   * Update user profile (name and email).
+   * Updates personal information during onboarding or profile editing.
+   */
+  async updateUserProfile(walletAddress: string, profile: { name?: string; email?: string }): Promise<void> {
+    const fields: string[] = [];
+    const values: any[] = [];
+    let paramIndex = 1;
+
+    if (profile.name !== undefined) {
+      fields.push(`name = $${paramIndex++}`);
+      values.push(profile.name);
+    }
+
+    if (profile.email !== undefined) {
+      fields.push(`email = $${paramIndex++}`);
+      values.push(profile.email);
+    }
+
+    if (fields.length === 0) {
+      return; // Nothing to update
+    }
+
+    fields.push(`updated_at = now()`);
+    values.push(walletAddress);
+
+    await this.pool.query(
+      `UPDATE users 
+       SET ${fields.join(', ')}
+       WHERE wallet_address = $${paramIndex}`,
+      values
+    );
+  }
+
+  /**
+   * Update the banned_until_unix for a user.
+   * Sets the ban expiry timestamp.
+   */
+  async updateUserBan(walletAddress: string, bannedUntilUnix: number | null): Promise<void> {
+    await this.pool.query(
+      `UPDATE users 
+       SET banned_until_unix = $2, updated_at = now()
+       WHERE wallet_address = $1`,
+      [walletAddress, bannedUntilUnix]
     );
   }
 

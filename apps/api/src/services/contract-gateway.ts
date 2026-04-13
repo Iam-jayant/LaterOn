@@ -26,7 +26,8 @@ export class ContractGateway {
   public constructor(
     private readonly store: InMemoryStore,
     private readonly chainService?: AlgorandAppService,
-    private readonly repository?: PostgresRepository
+    private readonly repository?: PostgresRepository,
+    private readonly scoreASALifecycleService?: any // Import type later to avoid circular dependency
   ) {}
 
   public async getOrCreateUser(walletAddress: string): Promise<UserProfile> {
@@ -343,6 +344,18 @@ export class ContractGateway {
 
     this.store.users.set(updatedUser.walletAddress, updatedUser);
 
+    // Trigger Score ASA metadata update if score changed (Requirement 16.1)
+    if (updatedUser.laterOnScore !== user.laterOnScore && this.scoreASALifecycleService) {
+      // Call metadata update asynchronously without blocking
+      this.scoreASALifecycleService.updateScoreASAMetadata({
+        walletAddress: updatedUser.walletAddress,
+        newScore: updatedUser.laterOnScore,
+        newTier: updatedUser.tier
+      }).catch((error: Error) => {
+        // Error is already logged in updateScoreASAMetadata
+      });
+    }
+
     this.emit("installment.paid", {
       planId: plan.planId,
       amountAlgo,
@@ -379,6 +392,8 @@ export class ContractGateway {
     plan.status = transition.nextStatus;
 
     const user = await this.getOrCreateUser(plan.walletAddress);
+    const previousBannedUntilUnix = user.bannedUntilUnix;
+    const previousScore = user.laterOnScore;
     let updatedProfile = applyRiskOutcomeToProfile(user, previousStatus, transition.nextStatus, atUnix);
     
     // Apply score decrease for overdue installments (Requirement 10.7)
@@ -394,6 +409,34 @@ export class ContractGateway {
       await this.repository.updateUser(updatedProfile);
     } else {
       this.store.plans.set(planId, plan);
+    }
+
+    // Trigger Score ASA metadata update if score changed (Requirement 16.1)
+    if (updatedProfile.laterOnScore !== previousScore && this.scoreASALifecycleService) {
+      // Call metadata update asynchronously without blocking
+      this.scoreASALifecycleService.updateScoreASAMetadata({
+        walletAddress: updatedProfile.walletAddress,
+        newScore: updatedProfile.laterOnScore,
+        newTier: updatedProfile.tier
+      }).catch((error: Error) => {
+        // Error is already logged in updateScoreASAMetadata
+      });
+    }
+
+    // Trigger Score ASA clawback on default (Requirement 17.1)
+    if (transition.nextStatus === "DEFAULTED" && previousStatus !== "DEFAULTED" && this.scoreASALifecycleService) {
+      // Call clawback asynchronously without blocking
+      this.scoreASALifecycleService.clawbackOnDefault(plan.walletAddress).catch((error: Error) => {
+        // Error is already logged in clawbackOnDefault
+      });
+    }
+
+    // Trigger Score ASA clawback on ban (Requirement 18.1)
+    if (updatedProfile.bannedUntilUnix && !previousBannedUntilUnix && this.scoreASALifecycleService) {
+      // Call clawback asynchronously without blocking
+      this.scoreASALifecycleService.clawbackOnBan(plan.walletAddress).catch((error: Error) => {
+        // Error is already logged in clawbackOnBan
+      });
     }
 
     this.emit("risk.settled", {

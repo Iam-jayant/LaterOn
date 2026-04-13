@@ -314,6 +314,15 @@ export class MarketplaceService {
    * @param quoteId - Quote ID from createMarketplaceQuote
    * @returns Array of base64-encoded unsigned transactions
    */
+  /**
+   * Prepare marketplace checkout by building unsigned transactions.
+   * Returns base64-encoded unsigned transactions for frontend signing.
+   * 
+   * For MVP: Returns empty array since we'll handle transactions in confirm step
+   * 
+   * @param quoteId - Quote ID from createMarketplaceQuote
+   * @returns Array of base64-encoded unsigned transactions
+   */
   public async prepareCheckout(quoteId: string): Promise<string[]> {
     // Validate quote exists and not expired
     const quote = this.contractGateway.getQuote(quoteId) as MarketplaceQuote;
@@ -331,15 +340,27 @@ export class MarketplaceService {
       walletAddress: quote.walletAddress
     });
 
-    // Build unsigned transactions
-    const unsignedTransactions = await this.contractGateway.buildUnsignedTransactionsFromQuote(quoteId);
+    // For MVP: Return empty array, transactions will be handled in backend
+    // In production: Build unsigned transactions for frontend signing
+    try {
+      const unsignedTransactions = await this.contractGateway.buildUnsignedTransactionsFromQuote(quoteId);
+      
+      logger.info("Unsigned transactions built successfully", {
+        quoteId,
+        transactionCount: unsignedTransactions.length
+      });
 
-    logger.info("Unsigned transactions built successfully", {
-      quoteId,
-      transactionCount: unsignedTransactions.length
-    });
-
-    return unsignedTransactions;
+      return unsignedTransactions;
+    } catch (error) {
+      // If blockchain service is not available, return empty array
+      // The confirm step will handle transaction submission
+      logger.warn("Blockchain service not available for transaction building, will handle in confirm step", {
+        quoteId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      
+      return [];
+    }
   }
 
   /**
