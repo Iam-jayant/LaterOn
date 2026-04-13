@@ -4,6 +4,7 @@ import React, { useState, useEffect } from "react";
 import { useWallet } from "@/hooks/useWallet";
 import { useTransactionSigner } from "@/hooks/useTransactionSigner";
 import { SigningModal } from "@/components/signing-modal";
+import { WalletModal } from "@/components/wallet-modal";
 
 const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
 
@@ -58,6 +59,7 @@ export function GiftCardCheckoutModal({
   const [error, setError] = useState<string | null>(null);
   const [dots, setDots] = useState("");
   const [copiedField, setCopiedField] = useState<"code" | "pin" | null>(null);
+  const [isWalletModalOpen, setIsWalletModalOpen] = useState(false);
 
   useEffect(() => {
     if (step === "quote" || step === "processing") {
@@ -105,27 +107,21 @@ export function GiftCardCheckoutModal({
     }
   };
 
-  const handleWalletConnect = async (): Promise<void> => {
-    try {
-      await connect("pera");
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Failed to connect wallet";
-      setError("Wallet connection failed. Please try again.");
-      setStep("error");
-      console.error("Wallet connection failed:", errorMessage);
-    }
+  const handleWalletConnect = (): void => {
+    setIsWalletModalOpen(true);
   };
 
   const handleCheckout = async (): Promise<void> => {
     if (!quote) return;
 
     setError(null);
-    setStep("processing"); // Show processing state
 
     try {
       console.log("Starting checkout with quoteId:", quote.quoteId);
       
-      const checkoutResponse = await fetch(`${apiBase}/api/marketplace/checkout`, {
+      // Step 1: Prepare checkout - get unsigned transactions from backend
+      console.log("Step 1: Preparing checkout...");
+      const prepareResponse = await fetch(`${apiBase}/api/marketplace/checkout/prepare`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -133,37 +129,85 @@ export function GiftCardCheckoutModal({
         })
       });
 
-      console.log("Checkout response status:", checkoutResponse.status);
-
-      if (!checkoutResponse.ok) {
-        const errorData = await checkoutResponse.json() as { error?: { message?: string; code?: string } };
-        console.error("Checkout error response:", errorData);
+      if (!prepareResponse.ok) {
+        const errorData = await prepareResponse.json() as { error?: { message?: string; code?: string } };
+        console.error("Prepare checkout error:", errorData);
         
         if (errorData.error?.code === "INSUFFICIENT_LIQUIDITY") {
           throw new Error("Insufficient pool liquidity. Please try again later.");
         } else if (errorData.error?.code === "QUOTE_EXPIRED") {
           throw new Error("Quote expired. Please create a new quote.");
-        } else if (errorData.error?.code === "FULFILLMENT_FAILED") {
+        }
+        
+        throw new Error(errorData.error?.message || "Failed to prepare checkout. Please try again.");
+      }
+
+      const prepareData = await prepareResponse.json() as { transactions: string[] };
+      console.log("Prepare response:", prepareData);
+
+      // Check if transactions were built
+      if (!prepareData.transactions || prepareData.transactions.length === 0) {
+        throw new Error("No transactions returned from backend. Blockchain service may not be configured.");
+      }
+
+      // Step 2: Decode unsigned transactions
+      console.log("Step 2: Decoding unsigned transactions...");
+      const { decodeUnsignedTransactions } = await import("@/lib/transaction-signer");
+      const unsignedTxns = decodeUnsignedTransactions(prepareData.transactions);
+      console.log("Decoded transactions:", unsignedTxns.length, "transactions");
+      console.log("First transaction genesisHash:", unsignedTxns[0]?.genesisHash);
+      console.log("First transaction genesisID:", unsignedTxns[0]?.genesisID);
+      
+      // Step 3: Sign transactions with wallet (without submitting)
+      console.log("Step 3: Signing transactions with wallet...");
+      const { walletService } = await import("@/lib/wallet");
+      const signedTxnBlobs = await walletService.signTransaction(unsignedTxns);
+      
+      // Convert signed blobs to base64
+      const signedTransactions = signedTxnBlobs.map(blob => 
+        Buffer.from(blob).toString('base64')
+      );
+      
+      console.log("Transactions signed successfully");
+
+      // Step 4: Confirm checkout - submit signed transactions and get gift card
+      console.log("Step 4: Confirming checkout and fulfilling gift card...");
+      setStep("processing");
+      
+      const confirmResponse = await fetch(`${apiBase}/api/marketplace/checkout/confirm`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          quoteId: quote.quoteId,
+          signedTransactions
+        })
+      });
+
+      if (!confirmResponse.ok) {
+        const errorData = await confirmResponse.json() as { error?: { message?: string; code?: string } };
+        console.error("Confirm checkout error:", errorData);
+        
+        if (errorData.error?.code === "FULFILLMENT_FAILED") {
           throw new Error(errorData.error.message || "Gift card delivery failed");
         }
         
-        throw new Error(errorData.error?.message || "Checkout failed. Please try again.");
+        throw new Error(errorData.error?.message || "Failed to confirm checkout. Please try again.");
       }
 
-      const checkoutData = await checkoutResponse.json() as {
+      const confirmData = await confirmResponse.json() as {
         success: boolean;
         giftCard: GiftCardDetails;
       };
 
-      console.log("Checkout response data:", checkoutData);
+      console.log("Confirm response:", confirmData);
 
-      if (checkoutData.success && checkoutData.giftCard) {
-        console.log("Setting gift card and success state");
-        setGiftCard(checkoutData.giftCard);
+      if (confirmData.success && confirmData.giftCard) {
+        console.log("Gift card received successfully");
+        setGiftCard(confirmData.giftCard);
         setStep("success");
-        onSuccess?.(checkoutData.giftCard);
+        onSuccess?.(confirmData.giftCard);
       } else {
-        console.error("Invalid checkout response structure:", checkoutData);
+        console.error("Invalid confirm response structure:", confirmData);
         throw new Error("Invalid checkout response");
       }
     } catch (err) {
@@ -778,6 +822,11 @@ export function GiftCardCheckoutModal({
           txId={txId}
           error={signingError}
           onClose={closeModal}
+        />
+
+        <WalletModal
+          isOpen={isWalletModalOpen}
+          onClose={() => setIsWalletModalOpen(false)}
         />
       </div>
     </div>

@@ -31,7 +31,7 @@ export function ScoreReveal({ authToken, onComplete }: ScoreRevealProps) {
   const [animationStep, setAnimationStep] = useState(0);
   const [displayScore, setDisplayScore] = useState(500);
 
-  // Fetch wallet analysis on mount
+  // Fetch wallet analysis on mount (only once)
   useEffect(() => {
     const fetchAnalysis = async () => {
       try {
@@ -52,7 +52,7 @@ export function ScoreReveal({ authToken, onComplete }: ScoreRevealProps) {
     };
 
     fetchAnalysis();
-  }, [authToken]);
+  }, []); // Empty dependency array to run only once on mount
 
   // Animate bars sequentially
   useEffect(() => {

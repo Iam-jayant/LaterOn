@@ -6,6 +6,7 @@ import { useWallet } from "../../hooks/useWallet";
 import { Navbar } from "../../components/landing/Navbar";
 import { GiftCardGrid, type GiftCardProduct } from "../../components/marketplace/GiftCardGrid";
 import { GiftCardCheckoutModal } from "../../components/marketplace/GiftCardCheckoutModal";
+import { AmountSelectionModal } from "../../components/marketplace/AmountSelectionModal";
 
 const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
 
@@ -18,6 +19,40 @@ interface CatalogResponse {
 }
 
 // ============================================================================
+// Category Mapping
+// ============================================================================
+
+const BRAND_CATEGORIES: Record<string, string[]> = {
+  'Entertainment': ['Netflix', 'Amazon Prime', 'Spotify', 'Apple Music', 'Disney', 'Hotstar', 'YouTube', 'Prime Video'],
+  'Gaming': ['Steam', 'PlayStation', 'Xbox', 'Nintendo', 'Google Play', 'Roblox', 'Epic Games', 'Razer'],
+  'Shopping': ['Amazon', 'Flipkart', 'Myntra', 'Ajio', 'Nykaa', 'Tata CLiQ', 'Shoppers Stop', 'Lifestyle'],
+  'Food & Dining': ['Swiggy', 'Zomato', 'Dominos', 'Pizza Hut', 'KFC', 'McDonald', 'Starbucks', 'Dunkin'],
+  'Fashion': ['H&M', 'Zara', 'Nike', 'Adidas', 'Puma', 'Levi', 'Reebok', 'Woodland'],
+  'Travel': ['MakeMyTrip', 'Goibibo', 'Cleartrip', 'Yatra', 'Uber', 'Ola', 'Airbnb'],
+  'Electronics': ['Croma', 'Reliance Digital', 'Vijay Sales', 'Samsung', 'Apple', 'OnePlus'],
+  'Beauty & Wellness': ['Nykaa', 'Purplle', 'Sephora', 'The Body Shop', 'Lakme', 'MAC'],
+};
+
+const FEATURED_BRANDS = ['Amazon', 'Flipkart', 'Netflix', 'Swiggy', 'Zomato', 'Myntra', 'Spotify', 'Google Play'];
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+function categorizeBrand(brandName: string): string {
+  for (const [category, brands] of Object.entries(BRAND_CATEGORIES)) {
+    if (brands.some(brand => brandName.toLowerCase().includes(brand.toLowerCase()))) {
+      return category;
+    }
+  }
+  return 'Other';
+}
+
+function isFeaturedBrand(brandName: string): boolean {
+  return FEATURED_BRANDS.some(brand => brandName.toLowerCase().includes(brand.toLowerCase()));
+}
+
+// ============================================================================
 // MarketplacePage Component
 // ============================================================================
 
@@ -26,9 +61,8 @@ interface CatalogResponse {
  * 
  * Features:
  * - Fetches catalog from API on mount
- * - Uses GiftCardGrid component for display
- * - Opens GiftCardCheckoutModal for purchases
- * - Handles API errors with user-friendly messages
+ * - Featured/Popular section at top
+ * - Category-based grouping
  * - Search filtering by brand name (case-insensitive)
  * - Enhanced Navbar with search and profile dropdown
  * 
@@ -42,6 +76,7 @@ export default function MarketplacePage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedProduct, setSelectedProduct] = useState<GiftCardProduct | null>(null);
   const [selectedDenomination, setSelectedDenomination] = useState<number | null>(null);
+  const [isAmountModalOpen, setIsAmountModalOpen] = useState(false);
   const [isCheckoutModalOpen, setIsCheckoutModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedProductId, setExpandedProductId] = useState<number | null>(null);
@@ -51,16 +86,37 @@ export default function MarketplacePage() {
     void loadCatalog();
   }, []);
 
-  // Filter catalog by search query (Requirements 4.3, 13.1, 13.2, 13.3)
-  const filteredCatalog = useMemo(() => {
-    if (!searchQuery.trim()) {
-      return catalog;
+  // Categorize and filter catalog
+  const { featuredProducts, categorizedProducts, filteredCatalog } = useMemo(() => {
+    let products = catalog;
+
+    // Apply search filter
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      products = products.filter(product => 
+        product.brandName.toLowerCase().includes(query)
+      );
     }
-    
-    const query = searchQuery.toLowerCase();
-    return catalog.filter(product => 
-      product.brandName.toLowerCase().includes(query)
-    );
+
+    // Separate featured products
+    const featured = products.filter(p => isFeaturedBrand(p.brandName));
+    const remaining = products.filter(p => !isFeaturedBrand(p.brandName));
+
+    // Group remaining by category
+    const categorized: Record<string, GiftCardProduct[]> = {};
+    remaining.forEach(product => {
+      const category = categorizeBrand(product.brandName);
+      if (!categorized[category]) {
+        categorized[category] = [];
+      }
+      categorized[category].push(product);
+    });
+
+    return {
+      featuredProducts: featured,
+      categorizedProducts: categorized,
+      filteredCatalog: products
+    };
   }, [catalog, searchQuery]);
 
   const loadCatalog = async (): Promise<void> => {
@@ -68,40 +124,52 @@ export default function MarketplacePage() {
     setError(null);
 
     try {
+      console.log('Fetching catalog from:', `${apiBase}/api/marketplace/catalog`);
       const response = await fetch(`${apiBase}/api/marketplace/catalog`);
       
+      console.log('Catalog response status:', response.status);
+      
       if (!response.ok) {
-        // Try to parse error response, but handle cases where it's not JSON
         let errorMessage = "Gift cards temporarily unavailable. Please try again later.";
         
         try {
           const errorData = await response.json() as { error?: { message?: string; code?: string } };
+          console.error('Catalog error response:', errorData);
           if (errorData.error?.message) {
             errorMessage = errorData.error.message;
           }
-        } catch {
-          // If JSON parsing fails, use default message
+        } catch (parseError) {
+          console.error('Failed to parse error response:', parseError);
+          // Try to get text response
+          try {
+            const errorText = await response.text();
+            console.error('Error response text:', errorText);
+          } catch {
+            // Ignore
+          }
         }
         
         throw new Error(errorMessage);
       }
 
       const data = (await response.json()) as CatalogResponse;
+      console.log('Catalog loaded successfully:', data.products.length, 'products');
       setCatalog(data.products);
     } catch (err) {
-      // Handle API errors with user-friendly messages (Requirement 12.1)
       const errorMessage = err instanceof Error ? err.message : "Gift cards temporarily unavailable. Please try again later.";
-      setError(errorMessage);
-      
-      // Log error for debugging (Requirement 12.5)
       console.error("Failed to load catalog:", err);
+      setError(errorMessage);
     } finally {
       setIsLoading(false);
     }
   };
 
   const handleCardExpand = (productId: number): void => {
-    setExpandedProductId(productId === expandedProductId ? null : productId);
+    const product = catalog.find(p => p.productId === productId);
+    if (product) {
+      setSelectedProduct(product);
+      setIsAmountModalOpen(true);
+    }
   };
 
   const handleCardClick = (product: GiftCardProduct, denomination: number): void => {
@@ -110,8 +178,13 @@ export default function MarketplacePage() {
     setIsCheckoutModalOpen(true);
   };
 
+  const handleAmountSelect = (denomination: number): void => {
+    setSelectedDenomination(denomination);
+    setIsAmountModalOpen(false);
+    setIsCheckoutModalOpen(true);
+  };
+
   const handleCheckoutSuccess = (): void => {
-    // Reset selection after successful purchase
     setSelectedProduct(null);
     setSelectedDenomination(null);
   };
@@ -131,7 +204,6 @@ export default function MarketplacePage() {
 
   return (
     <main className="shell">
-      {/* Enhanced Navbar with Search and Profile - Requirements 4.1, 4.2, 4.4, 4.5, 13.5 */}
       <Navbar 
         showSearch={true}
         showProfile={true}
@@ -140,7 +212,6 @@ export default function MarketplacePage() {
         onDisconnect={handleDisconnect}
       />
 
-      {/* Main Content */}
       <section className="card" style={{ marginTop: '100px' }}>
         <div className="eyebrow">Browse Gift Cards</div>
         <h2 style={{ marginTop: 10 }}>Buy now, pay in 3 installments</h2>
@@ -148,28 +219,103 @@ export default function MarketplacePage() {
           Choose from popular brands and split your payment into 3 easy installments
         </p>
 
-        {/* Gift Card Grid Component (Requirement 2.1, 2.4) */}
-        <GiftCardGrid
-          products={filteredCatalog}
-          isLoading={isLoading}
-          error={error}
-          selectedProduct={selectedProduct}
-          selectedDenomination={selectedDenomination}
-          onCardSelect={handleCardClick}
-          expandedProductId={expandedProductId}
-          onCardClick={handleCardExpand}
-        />
+        {/* Loading State */}
+        {isLoading && (
+          <GiftCardGrid
+            products={[]}
+            isLoading={true}
+            error={null}
+            selectedProduct={selectedProduct}
+            selectedDenomination={selectedDenomination}
+            onCardSelect={handleCardClick}
+            expandedProductId={expandedProductId}
+            onCardClick={handleCardExpand}
+          />
+        )}
 
-        {/* No Results Message - Requirement 13.4 */}
+        {/* Error State */}
+        {!isLoading && error && (
+          <div className="error" style={{ marginTop: 20 }}>
+            {error}
+          </div>
+        )}
+
+        {/* No Results */}
         {!isLoading && !error && searchQuery && filteredCatalog.length === 0 && (
           <p style={{ marginTop: 20, textAlign: "center", color: "var(--muted)" }}>
             No gift cards found matching "{searchQuery}"
           </p>
         )}
 
+        {/* Featured Section */}
+        {!isLoading && !error && featuredProducts.length > 0 && (
+          <div style={{ marginTop: 32 }}>
+            <h3 style={{ 
+              fontFamily: 'Space Grotesk, sans-serif',
+              fontSize: '20px',
+              fontWeight: 600,
+              color: '#0A0C12',
+              marginBottom: 16
+            }}>
+              ⭐ Featured & Popular
+            </h3>
+            <GiftCardGrid
+              products={featuredProducts}
+              isLoading={false}
+              error={null}
+              selectedProduct={selectedProduct}
+              selectedDenomination={selectedDenomination}
+              onCardSelect={handleCardClick}
+              expandedProductId={expandedProductId}
+              onCardClick={handleCardExpand}
+            />
+          </div>
+        )}
+
+        {/* Category Sections */}
+        {!isLoading && !error && Object.entries(categorizedProducts).map(([category, products]) => (
+          products.length > 0 && (
+            <div key={category} style={{ marginTop: 40 }}>
+              <h3 style={{ 
+                fontFamily: 'Space Grotesk, sans-serif',
+                fontSize: '20px',
+                fontWeight: 600,
+                color: '#0A0C12',
+                marginBottom: 16,
+                paddingBottom: 8,
+                borderBottom: '2px solid rgba(10,12,18,0.07)'
+              }}>
+                {category}
+              </h3>
+              <GiftCardGrid
+                products={products}
+                isLoading={false}
+                error={null}
+                selectedProduct={selectedProduct}
+                selectedDenomination={selectedDenomination}
+                onCardSelect={handleCardClick}
+                expandedProductId={expandedProductId}
+                onCardClick={handleCardExpand}
+              />
+            </div>
+          )
+        ))}
       </section>
 
-      {/* Checkout Modal (Requirement 5.2, 5.3, 5.7, 6.1, 6.5, 6.6, 7.3, 7.4) */}
+      {/* Amount Selection Modal */}
+      {selectedProduct && (
+        <AmountSelectionModal
+          isOpen={isAmountModalOpen}
+          product={selectedProduct}
+          onSelect={handleAmountSelect}
+          onClose={() => {
+            setIsAmountModalOpen(false);
+            setSelectedProduct(null);
+          }}
+        />
+      )}
+
+      {/* Checkout Modal */}
       {selectedProduct && selectedDenomination && (
         <GiftCardCheckoutModal
           isOpen={isCheckoutModalOpen}
@@ -177,7 +323,11 @@ export default function MarketplacePage() {
           brandName={selectedProduct.brandName}
           denomination={selectedDenomination}
           productId={selectedProduct.productId}
-          onClose={() => setIsCheckoutModalOpen(false)}
+          onClose={() => {
+            setIsCheckoutModalOpen(false);
+            setSelectedProduct(null);
+            setSelectedDenomination(null);
+          }}
           onSuccess={handleCheckoutSuccess}
         />
       )}
