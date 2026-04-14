@@ -133,56 +133,109 @@ export class AlgorandAppService {
 
   /**
    * Build unsigned marketplace transactions for frontend signing.
-   * Returns base64-encoded unsigned transactions.
+   * Returns atomic group of 3 transactions:
+   * - Txn 0: User → Pool (1st EMI)
+   * - Txn 1: Pool → Merchant (full amount, will be signed by relayer)
+   * - Txn 2: BNPL contract call (create_plan)
    * 
    * @param borrowerAddress - User's wallet address
-   * @param financedAmountAlgo - Total amount to finance in ALGO
-   * @returns Array of base64-encoded unsigned transactions
+   * @param totalAmountAlgo - Total order amount in ALGO
+   * @param merchantAddress - Merchant's Algorand address
+   * @param tierAtApproval - User's tier (0=NEW, 1=EMERGING, 2=TRUSTED)
+   * @returns Array of base64-encoded unsigned transactions (user only signs Txn 0)
    */
   public async buildMarketplaceTransactions(
     borrowerAddress: string,
-    financedAmountAlgo: number
+    totalAmountAlgo: number,
+    merchantAddress: string,
+    tierAtApproval: number = 0
   ): Promise<string[]> {
-    // Simple architecture: User pays full amount to pool
-    // Backend will handle merchant payment after confirmation
-    
     if (!this.config.chainEnabled) {
       throw new Error("Blockchain service not properly configured");
     }
 
-    const totalAmountMicroAlgo = Math.round(financedAmountAlgo * 1_000_000);
+    if (!this.signer) {
+      throw new Error("Relayer account not configured");
+    }
 
-    // Generate unique plan ID for tracking
-    const planId = Date.now();
+    // Calculate amounts
+    const totalMicroAlgo = Math.round(totalAmountAlgo * 1_000_000);
+    const firstEmiMicroAlgo = Math.round((totalAmountAlgo / 3) * 1_000_000);
+    
+    // Calculate next due date (30 days from now)
+    const nextDueUnix = Math.floor(Date.now() / 1000) + (30 * 24 * 60 * 60);
 
     const suggestedParams = await this.algod.getTransactionParams().do();
 
-    // Single payment: User pays full amount to pool
-    const paymentTx = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
+    // Transaction 0: User pays 1st EMI to pool
+    const userPaymentTx = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
       sender: borrowerAddress,
       receiver: this.config.lendingPoolAddress,
-      amount: totalAmountMicroAlgo,
+      amount: firstEmiMicroAlgo,
       note: new Uint8Array(Buffer.from(JSON.stringify({
-        type: 'MARKETPLACE_BNPL',
-        planId: `plan_${planId}`,
-        version: '1.0'
+        type: 'MARKETPLACE_BNPL_EMI1',
+        totalAmount: totalAmountAlgo,
+        version: '2.0'
       }))),
       suggestedParams,
     });
 
-    // Return single transaction
-    return [Buffer.from(algosdk.encodeUnsignedTransaction(paymentTx)).toString('base64')];
+    // Transaction 1: Pool pays full amount to merchant (signed by relayer)
+    const poolPaymentTx = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
+      sender: this.signer.sender,
+      receiver: merchantAddress,
+      amount: totalMicroAlgo,
+      note: new Uint8Array(Buffer.from(JSON.stringify({
+        type: 'MARKETPLACE_BNPL_FULL',
+        totalAmount: totalAmountAlgo,
+        version: '2.0'
+      }))),
+      suggestedParams,
+    });
+
+    // Transaction 2: BNPL contract call (create_plan)
+    const appArgs = [
+      new TextEncoder().encode("create_plan"),
+      algosdk.decodeAddress(borrowerAddress).publicKey,
+      algosdk.encodeUint64(totalMicroAlgo),
+      algosdk.encodeUint64(firstEmiMicroAlgo),
+      algosdk.decodeAddress(this.config.lendingPoolAddress).publicKey,
+      algosdk.decodeAddress(merchantAddress).publicKey,
+      algosdk.encodeUint64(nextDueUnix),
+      new Uint8Array([tierAtApproval])
+    ];
+
+    const appCallTx = algosdk.makeApplicationNoOpTxnFromObject({
+      appIndex: this.config.bnplAppId,
+      sender: this.signer.sender,
+      suggestedParams,
+      appArgs
+    });
+
+    // Group transactions
+    const txGroup = [userPaymentTx, poolPaymentTx, appCallTx];
+    algosdk.assignGroupID(txGroup);
+
+    // Sign transactions 1 and 2 with relayer (backend)
+    const signedPoolPayment = poolPaymentTx.signTxn(this.signer.privateKey);
+    const signedAppCall = appCallTx.signTxn(this.signer.privateKey);
+
+    // Return: Txn 0 unsigned (for user), Txn 1 & 2 signed (by relayer)
+    return [
+      Buffer.from(algosdk.encodeUnsignedTransaction(userPaymentTx)).toString('base64'),
+      Buffer.from(signedPoolPayment).toString('base64'),
+      Buffer.from(signedAppCall).toString('base64')
+    ];
   }
 
   /**
    * Submit signed transactions to the blockchain.
+   * Handles atomic transaction groups.
    * 
    * @param signedTransactions - Array of base64-encoded signed transactions
    * @returns Transaction ID of the first transaction in the group
    */
   public async submitSignedTransactions(signedTransactions: string[]): Promise<string> {
-    // Submitting signed transactions doesn't need relayer - user already signed them
-    // Only check if chain is enabled
     if (!this.config.chainEnabled) {
       throw new Error("Blockchain service not enabled");
     }
@@ -194,57 +247,6 @@ export class AlgorandAppService {
 
     // Submit transaction group
     const sendResult = await this.algod.sendRawTransaction(signedTxnBlobs).do();
-    const txId = sendResult.txid;
-
-    // Wait for confirmation
-    await algosdk.waitForConfirmation(
-      this.algod,
-      txId,
-      this.config.chainWaitRounds
-    );
-
-    return txId;
-  }
-
-  /**
-   * Send payment from pool to merchant using relayer account.
-   * This is called after user payment is confirmed.
-   * 
-   * @param merchantAddress - Merchant's Algorand address
-   * @param amountAlgo - Amount to send in ALGO
-   * @param note - Optional transaction note
-   * @returns Transaction ID
-   */
-  public async sendPoolPaymentToMerchant(
-    merchantAddress: string,
-    amountAlgo: number,
-    note?: string
-  ): Promise<string> {
-    if (!this.config.chainEnabled) {
-      throw new Error("Blockchain service not enabled");
-    }
-
-    if (!this.signer) {
-      throw new Error("Relayer account not configured. Set RELAYER_PRIVATE_KEY or RELAYER_MNEMONIC in .env");
-    }
-
-    const amountMicroAlgo = Math.round(amountAlgo * 1_000_000);
-    const suggestedParams = await this.algod.getTransactionParams().do();
-
-    // Create payment transaction from pool to merchant
-    const paymentTx = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
-      sender: this.signer.sender,
-      receiver: merchantAddress,
-      amount: amountMicroAlgo,
-      note: note ? new Uint8Array(Buffer.from(note)) : undefined,
-      suggestedParams,
-    });
-
-    // Sign with relayer (pool) private key
-    const signedTx = paymentTx.signTxn(this.signer.privateKey);
-
-    // Submit transaction
-    const sendResult = await this.algod.sendRawTransaction(signedTx).do();
     const txId = sendResult.txid;
 
     // Wait for confirmation

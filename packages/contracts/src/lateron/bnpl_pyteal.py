@@ -267,26 +267,36 @@ def _create_plan() -> Expr:
     """
     Create a new payment plan in box storage.
     
-    This function validates an atomic transaction group for checkout:
-    - Txn 0: Upfront payment from borrower to merchant (payment transaction)
-    - Txn 1: Pool lend call (application call to LiquidityPool)
+    This function validates an atomic transaction group for BNPL marketplace checkout:
+    - Txn 0: First EMI payment from borrower to pool (payment transaction)
+    - Txn 1: Full amount payment from pool to merchant (payment transaction, signed by relayer)
     - Txn 2: Plan creation call (this transaction)
+    
+    Flow:
+    1. User pays 1st EMI (1/3 of total) to pool
+    2. Pool pays full amount to merchant (automated by backend)
+    3. BNPL contract creates plan with 2 remaining installments
     
     Expected args:
     - args[0]: method name ("create_plan")
     - args[1]: borrower_address (32 bytes)
-    - args[2]: financed_amount_microalgo (8 bytes, uint64)
-    - args[3]: upfront_amount_microalgo (8 bytes, uint64)
-    - args[4]: merchant_address (32 bytes)
-    - args[5]: next_due_unix (8 bytes, uint64)
-    - args[6]: tier_at_approval (1 byte, uint8: 0=NEW, 1=EMERGING, 2=TRUSTED)
+    - args[2]: total_amount_microalgo (8 bytes, uint64) - full order amount
+    - args[3]: first_emi_amount_microalgo (8 bytes, uint64) - 1/3 of total
+    - args[4]: pool_address (32 bytes)
+    - args[5]: merchant_address (32 bytes)
+    - args[6]: next_due_unix (8 bytes, uint64)
+    - args[7]: tier_at_approval (1 byte, uint8: 0=NEW, 1=EMERGING, 2=TRUSTED)
     """
     borrower_address = Txn.application_args[1]
-    financed_amount = Btoi(Txn.application_args[2])
-    upfront_amount = Btoi(Txn.application_args[3])
-    merchant_address = Txn.application_args[4]
-    next_due_unix = Btoi(Txn.application_args[5])
-    tier_at_approval = Btoi(Txn.application_args[6])
+    total_amount = Btoi(Txn.application_args[2])
+    first_emi_amount = Btoi(Txn.application_args[3])
+    pool_address = Txn.application_args[4]
+    merchant_address = Txn.application_args[5]
+    next_due_unix = Btoi(Txn.application_args[6])
+    tier_at_approval = Btoi(Txn.application_args[7])
+    
+    # Calculate financed amount (remaining after first EMI)
+    financed_amount = total_amount - first_emi_amount
     
     # Get next plan ID
     new_plan_id = App.globalGet(PLAN_COUNTER_KEY) + Int(1)
@@ -294,11 +304,8 @@ def _create_plan() -> Expr:
     # Get user's current outstanding amount
     current_outstanding = _get_user_outstanding(borrower_address)
     
-    # Calculate new outstanding amount after this plan
+    # Calculate new outstanding amount (only the remaining 2 EMIs)
     new_outstanding = current_outstanding + financed_amount
-    
-    # Calculate total order amount (upfront + financed)
-    order_amount = upfront_amount + financed_amount
     
     # Get tier limits
     outstanding_limit = _get_tier_outstanding_limit(tier_at_approval)
@@ -307,58 +314,63 @@ def _create_plan() -> Expr:
     return Seq(
         _assert_not_paused(),
         # Validate arguments
-        Assert(Txn.application_args.length() >= Int(7)),
+        Assert(Txn.application_args.length() >= Int(8)),
         Assert(Len(borrower_address) == Int(32)),
+        Assert(Len(pool_address) == Int(32)),
         Assert(Len(merchant_address) == Int(32)),
-        Assert(financed_amount > Int(0)),
-        Assert(upfront_amount > Int(0)),
+        Assert(total_amount > Int(0)),
+        Assert(first_emi_amount > Int(0)),
+        Assert(first_emi_amount <= total_amount),
         Assert(next_due_unix > Global.latest_timestamp()),
         Assert((tier_at_approval == TIER_NEW) | (tier_at_approval == TIER_EMERGING) | (tier_at_approval == TIER_TRUSTED)),
         
         # Enforce tier limits
         # Check that the new outstanding amount doesn't exceed the tier's outstanding limit
         Assert(new_outstanding <= outstanding_limit),
-        # Check that the order amount doesn't exceed the tier's order limit
-        Assert(order_amount <= order_limit),
+        # Check that the total order amount doesn't exceed the tier's order limit
+        Assert(total_amount <= order_limit),
         
         # Validate atomic transaction group structure
         # Must be part of a group of exactly 3 transactions
         Assert(Global.group_size() == Int(3)),
         
-        # Validate Transaction 0: Upfront payment from borrower to merchant
+        # Validate Transaction 0: First EMI payment from borrower to pool
         # Must be a payment transaction
         Assert(Gtxn[0].type_enum() == TxnType.Payment),
         # Sender must be the borrower
         Assert(Gtxn[0].sender() == borrower_address),
-        # Receiver must be the merchant
-        Assert(Gtxn[0].receiver() == merchant_address),
-        # Amount must match the upfront amount
-        Assert(Gtxn[0].amount() == upfront_amount),
+        # Receiver must be the pool
+        Assert(Gtxn[0].receiver() == pool_address),
+        # Amount must match the first EMI amount
+        Assert(Gtxn[0].amount() == first_emi_amount),
         
-        # Validate Transaction 1: Pool lend call
-        # Must be an application call
-        Assert(Gtxn[1].type_enum() == TxnType.ApplicationCall),
-        # Must call the lend_out method
-        Assert(Gtxn[1].application_args[0] == Bytes("lend_out")),
-        # Lend amount must match financed amount
-        Assert(Btoi(Gtxn[1].application_args[1]) == financed_amount),
+        # Validate Transaction 1: Full amount payment from pool to merchant
+        # Must be a payment transaction
+        Assert(Gtxn[1].type_enum() == TxnType.Payment),
+        # Sender must be the pool (relayer)
+        Assert(Gtxn[1].sender() == pool_address),
+        # Receiver must be the merchant
+        Assert(Gtxn[1].receiver() == merchant_address),
+        # Amount must match the total order amount
+        Assert(Gtxn[1].amount() == total_amount),
         
         # Validate Transaction 2: This transaction (plan creation)
         # Verify this is transaction index 2 in the group
         Assert(Txn.group_index() == Int(2)),
         
         # Create plan box with initial state
+        # User already paid 1st EMI, so remaining = financed_amount (2 EMIs)
         _create_plan_box(
             new_plan_id,
             borrower_address,
-            financed_amount,
-            financed_amount,  # remaining = financed initially
-            Int(0),  # installments_paid = 0 initially
+            total_amount,  # Store total amount for reference
+            financed_amount,  # Remaining = 2 EMIs (user already paid 1st)
+            Int(1),  # installments_paid = 1 (first EMI just paid)
             next_due_unix,
             STATUS_ACTIVE,  # status = ACTIVE initially
             tier_at_approval
         ),
-        # Update user's outstanding amount
+        # Update user's outstanding amount (only remaining 2 EMIs)
         _update_user_outstanding(borrower_address, new_outstanding),
         # Update global state
         App.globalPut(PLAN_COUNTER_KEY, new_plan_id),

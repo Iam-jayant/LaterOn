@@ -315,13 +315,14 @@ export class MarketplaceService {
    * @returns Array of base64-encoded unsigned transactions
    */
   /**
-   * Prepare marketplace checkout by building unsigned transactions.
-   * Returns base64-encoded unsigned transactions for frontend signing.
-   * 
-   * For MVP: Returns empty array since we'll handle transactions in confirm step
+   * Prepare marketplace checkout by building atomic transaction group.
+   * Returns array with 3 transactions:
+   * - [0]: Unsigned (user must sign)
+   * - [1]: Signed by relayer (pool → merchant)
+   * - [2]: Signed by relayer (BNPL contract call)
    * 
    * @param quoteId - Quote ID from createMarketplaceQuote
-   * @returns Array of base64-encoded unsigned transactions
+   * @returns Array of base64-encoded transactions (mix of unsigned and signed)
    */
   public async prepareCheckout(quoteId: string): Promise<string[]> {
     // Validate quote exists and not expired
@@ -334,40 +335,40 @@ export class MarketplaceService {
       throw new ValidationError("Quote expired");
     }
 
-    logger.info("Preparing marketplace checkout", {
+    logger.info("Preparing marketplace checkout with atomic transaction group", {
       quoteId,
       productId: quote.productId,
-      walletAddress: quote.walletAddress
+      walletAddress: quote.walletAddress,
+      totalAmount: quote.orderAmountAlgo
     });
 
-    // For MVP: Return empty array, transactions will be handled in backend
-    // In production: Build unsigned transactions for frontend signing
     try {
-      const unsignedTransactions = await this.contractGateway.buildUnsignedTransactionsFromQuote(quoteId);
+      // Build atomic transaction group (3 transactions)
+      // Merchant address is pool for now (in production, use actual merchant address)
+      const merchantAddress = this.config.lendingPoolAddress;
       
-      logger.info("Unsigned transactions built successfully", {
+      const transactions = await this.contractGateway.chainService.buildMarketplaceTransactions(
+        quote.walletAddress,
+        quote.orderAmountAlgo,
+        merchantAddress,
+        0 // tierAtApproval: 0=NEW (TODO: get from user profile)
+      );
+      
+      logger.info("Atomic transaction group built successfully", {
         quoteId,
-        transactionCount: unsignedTransactions.length
+        transactionCount: transactions.length,
+        flow: "User→Pool (unsigned), Pool→Merchant (signed), BNPL contract (signed)"
       });
 
-      return unsignedTransactions;
+      return transactions;
     } catch (error) {
-      // Log detailed error for debugging
-      logger.error("Failed to build unsigned transactions", {
+      logger.error("Failed to build atomic transaction group", {
         quoteId,
         error: error instanceof Error ? error.message : String(error),
-        errorStack: error instanceof Error ? error.stack : undefined,
-        errorDetails: error
+        errorStack: error instanceof Error ? error.stack : undefined
       });
       
-      // If blockchain service is not available, return empty array
-      // The confirm step will handle transaction submission
-      logger.warn("Blockchain service not available for transaction building, will handle in confirm step", {
-        quoteId,
-        error: error instanceof Error ? error.message : String(error)
-      });
-      
-      return [];
+      throw new Error("Failed to prepare checkout transactions");
     }
   }
 
@@ -379,18 +380,19 @@ export class MarketplaceService {
    * @returns Gift card details with code and PIN
    */
   /**
-   * Confirm marketplace checkout by submitting signed transactions and fulfilling gift card.
+   * Confirm marketplace checkout by submitting atomic transaction group.
    * 
    * Flow:
-   * 1. Submit user's payment transaction (user → pool)
-   * 2. Wait for confirmation
-   * 3. Send payment from pool to merchant (automated)
-   * 4. Purchase gift card from Reloadly
-   * 5. Create BNPL plan in database
-   * 6. Deliver gift card to user
+   * 1. User signs Txn 0 (user → pool, 1st EMI)
+   * 2. Backend already signed Txn 1 & 2 (pool → merchant, BNPL contract)
+   * 3. Submit all 3 transactions as atomic group
+   * 4. Wait for confirmation
+   * 5. Purchase gift card from Reloadly
+   * 6. Create BNPL plan in database
+   * 7. Deliver gift card to user
    * 
    * @param quoteId - Quote ID from createMarketplaceQuote
-   * @param signedTransactions - Array of base64-encoded signed transactions
+   * @param signedTransactions - Array of 3 base64-encoded transactions (Txn 0 signed by user, Txn 1 & 2 already signed)
    * @returns Gift card details with code and PIN
    */
   public async confirmCheckout(
@@ -408,48 +410,36 @@ export class MarketplaceService {
       throw new ValidationError("Quote expired");
     }
 
-    logger.info("Confirming marketplace checkout", {
+    // Validate we have 3 transactions (atomic group)
+    if (signedTransactions.length !== 3) {
+      throw new ValidationError(`Expected 3 transactions in atomic group, got ${signedTransactions.length}`);
+    }
+
+    logger.info("Confirming marketplace checkout with atomic transaction group", {
       quoteId,
       productId: quote.productId,
       transactionCount: signedTransactions.length,
-      orderAmountAlgo: quote.orderAmountAlgo
+      totalAmount: quote.orderAmountAlgo,
+      firstEmiAmount: quote.orderAmountAlgo / this.config.marketplaceTenureMonths
     });
 
-    // Step 1: Submit user's payment transaction (user → pool)
-    logger.info("Step 1: Submitting user payment to pool", { quoteId });
-    const userTxId = await this.contractGateway.chainService.submitSignedTransactions(signedTransactions);
+    // Step 1: Submit atomic transaction group (all 3 transactions together)
+    logger.info("Submitting atomic transaction group to blockchain", { quoteId });
     
-    logger.info("User payment confirmed", { 
+    const txId = await this.contractGateway.chainService.submitSignedTransactions(signedTransactions);
+    
+    logger.info("Atomic transaction group confirmed", { 
       quoteId, 
-      txId: userTxId,
-      amount: quote.orderAmountAlgo 
+      txId,
+      flow: "User→Pool (1st EMI), Pool→Merchant (full amount), BNPL contract (plan created)"
     });
 
-    // Step 2: Send payment from pool to merchant (automated backend payment)
-    logger.info("Step 2: Sending payment from pool to merchant", { quoteId });
-    
-    // For marketplace, merchant is Reloadly (we use pool address as placeholder)
-    // In production, this would be the actual merchant's Algorand address
-    const merchantAddress = this.config.lendingPoolAddress; // TODO: Use actual merchant address
-    
-    const poolTxId = await this.contractGateway.chainService.sendPoolPaymentToMerchant(
-      merchantAddress,
-      quote.orderAmountAlgo,
-      `Marketplace payment for quote ${quoteId}`
-    );
-
-    logger.info("Pool payment to merchant confirmed", {
-      quoteId,
-      txId: poolTxId,
-      amount: quote.orderAmountAlgo
-    });
-
-    // Step 3: Create BNPL plan in database
+    // Step 2: Create BNPL plan in database
     const planId = createId("plan");
     const createdAtUnix = nowUnix();
     const installmentAmountAlgo = quote.orderAmountAlgo / this.config.marketplaceTenureMonths;
     
-    // Calculate due dates for remaining installments (user already paid first)
+    // Calculate due dates for remaining 2 installments (user already paid first)
     const installments = [];
     for (let i = 1; i < this.config.marketplaceTenureMonths; i++) {
       installments.push({
@@ -480,22 +470,23 @@ export class MarketplaceService {
     if (this.repository) {
       await this.repository.savePlan(plan);
       
-      // Update user's outstanding amount
+      // Update user's outstanding amount (only remaining 2 EMIs)
       const user = await this.repository.getOrCreateUser(quote.walletAddress);
       user.activeOutstandingInr += plan.remainingAmountAlgo * quote.algoToInrRate;
       await this.repository.updateUser(user);
     }
 
-    logger.info("BNPL plan created", {
+    logger.info("BNPL plan created in database", {
       planId: plan.planId,
       quoteId,
       productId: quote.productId,
       installmentsPaid: 1,
-      remainingInstallments: installments.length
+      remainingInstallments: installments.length,
+      blockchainTxId: txId
     });
 
-    // Step 4: Purchase gift card from Reloadly
-    logger.info("Step 4: Purchasing gift card from Reloadly", { quoteId, planId });
+    // Step 3: Purchase gift card from Reloadly
+    logger.info("Purchasing gift card from Reloadly", { quoteId, planId });
     
     try {
       const fulfillment = await this.reloadlyService.purchaseGiftCard({
@@ -516,7 +507,7 @@ export class MarketplaceService {
         code: fulfillment.code,
         pin: fulfillment.pin,
         purchasedAtUnix: nowUnix(),
-        expiresAt: null // Reloadly doesn't provide expiration in sandbox
+        expiresAt: null
       };
 
       // Store gift card details in database
@@ -529,18 +520,16 @@ export class MarketplaceService {
         quoteId,
         reloadlyTransactionId: fulfillment.transactionId,
         productName: quote.productName,
-        userTxId,
-        poolTxId
+        blockchainTxId: txId
       });
 
       return giftCardDetails;
     } catch (error) {
-      // Fulfillment failed after payments - critical error
-      logger.error("Gift card fulfillment failed after successful payments", {
+      // Fulfillment failed after successful blockchain transaction - critical error
+      logger.error("Gift card fulfillment failed after successful blockchain transaction", {
         planId: plan.planId,
         quoteId,
-        userTxId,
-        poolTxId,
+        blockchainTxId: txId,
         error
       });
 
@@ -551,7 +540,7 @@ export class MarketplaceService {
 
       throw new Error(
         `Payment successful but gift card delivery failed. ` +
-        `Transaction IDs: User=${userTxId}, Pool=${poolTxId}. ` +
+        `Blockchain transaction: ${txId}. ` +
         `Contact support with plan ID: ${planId}`
       );
     }
