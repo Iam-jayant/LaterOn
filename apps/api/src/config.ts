@@ -94,7 +94,7 @@ const parseKnownDefiAppIds = (input?: string): number[] => {
 };
 
 const rawEnvConfig = (): Partial<ApiConfig> => ({
-  apiPort: envNumber("API_PORT", 4000),
+  apiPort: envNumber("PORT", envNumber("API_PORT", 4000)),
   quoteTtlSeconds: envNumber("QUOTE_TTL_SECONDS", 300),
   defaultAlgoPerInr: envNumber("DEFAULT_ALGO_PER_INR", 0.0022),
   adminApiKey: process.env.ADMIN_API_KEY ?? "change-me",
