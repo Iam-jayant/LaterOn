@@ -12,6 +12,21 @@ import { dirname } from "path";
 export class PostgresRepository {
   constructor(private readonly pool: Pool) {}
 
+  private readonly defaultTenureMonths = 3;
+  private readonly installmentIntervalSeconds = 30 * 24 * 60 * 60;
+
+  private encodeGiftCardDenomination(denomination: number): number {
+    return -Math.round(denomination * 100);
+  }
+
+  private decodeGiftCardDenomination(rawDenomination: number): number {
+    if (rawDenomination < 0) {
+      return Math.abs(rawDenomination) / 100;
+    }
+
+    return rawDenomination;
+  }
+
   /**
    * Initialize database tables and indexes.
    * Safe to call multiple times (uses IF NOT EXISTS).
@@ -62,17 +77,21 @@ export class PostgresRepository {
       CREATE INDEX IF NOT EXISTS idx_deposits_tx_id ON lender_deposits(tx_id);
     `);
 
-    // Run migration 003: DPDP Consent and Score ASA
-    try {
-      const __filename = fileURLToPath(import.meta.url);
-      const __dirname = dirname(__filename);
-      const migrationPath = join(__dirname, "migrations", "003_dpdp_consent_score_asa.sql");
-      const migrationSql = readFileSync(migrationPath, "utf-8");
-      await this.pool.query(migrationSql);
-      console.log("[PostgresRepository] Applied migration: 003_dpdp_consent_score_asa.sql");
-    } catch (error) {
-      console.error("[PostgresRepository] Failed to apply migration 003:", error);
-      // Don't throw - migration might already be applied
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = dirname(__filename);
+    for (const migrationName of [
+      "003_dpdp_consent_score_asa.sql",
+      "004_add_user_profile_columns.sql",
+      "005_fix_email_nullable.sql",
+    ]) {
+      try {
+        const migrationPath = join(__dirname, "migrations", migrationName);
+        const migrationSql = readFileSync(migrationPath, "utf-8");
+        await this.pool.query(migrationSql);
+        console.log(`[PostgresRepository] Applied migration: ${migrationName}`);
+      } catch (error) {
+        console.error(`[PostgresRepository] Failed to apply migration ${migrationName}:`, error);
+      }
     }
   }
 
@@ -228,6 +247,8 @@ export class PostgresRepository {
       laterOnScore: row.later_on_score ?? 500,
       bannedUntilUnix: row.banned_until_unix ?? undefined,
       scoreAsaId: row.score_asa_id ?? undefined,
+      name: row.name ?? null,
+      email: row.email ?? null,
     } as any; // Type assertion needed for extended fields
   }
 
@@ -235,21 +256,41 @@ export class PostgresRepository {
    * Map database row to PlanRecord domain object.
    */
   private mapPlan(row: any): PlanRecord {
+    const createdAtUnix = Math.floor(new Date(row.created_at).getTime() / 1000);
+    const financedAmountAlgo = row.financed_amount_microalgo / 1_000_000;
+    const remainingAmountAlgo = row.remaining_amount_microalgo / 1_000_000;
+    const installmentsPaid = row.installments_paid;
+    const tenureMonths = this.defaultTenureMonths;
+    const installmentAmountAlgo = financedAmountAlgo / tenureMonths;
+    const installments = Array.from({ length: tenureMonths }, (_, index) => {
+      const installmentNumber = index + 1;
+      const dueAtUnix =
+        installmentNumber <= installmentsPaid
+          ? row.next_due_unix - ((installmentsPaid - installmentNumber + 1) * this.installmentIntervalSeconds)
+          : row.next_due_unix + ((installmentNumber - installmentsPaid - 1) * this.installmentIntervalSeconds);
+
+      return {
+        installmentNumber,
+        dueAtUnix,
+        amountAlgo: installmentAmountAlgo,
+      };
+    });
+
     return {
       planId: row.plan_id,
       walletAddress: row.borrower_wallet_address,
       merchantId: row.merchant_id,
       status: row.status,
       tierAtApproval: row.tier_at_approval,
-      tenureMonths: 3, // Fixed for MVP
+      tenureMonths,
       aprPercent: 0, // Fixed for MVP (no interest)
-      createdAtUnix: Math.floor(new Date(row.created_at).getTime() / 1000),
+      createdAtUnix,
       nextDueAtUnix: row.next_due_unix,
-      financedAmountInr: row.financed_amount_microalgo / 1_000_000,
-      financedAmountAlgo: row.financed_amount_microalgo / 1_000_000,
-      remainingAmountAlgo: row.remaining_amount_microalgo / 1_000_000,
-      installmentsPaid: row.installments_paid,
-      installments: [], // Not stored in MVP schema
+      financedAmountInr: financedAmountAlgo,
+      financedAmountAlgo,
+      remainingAmountAlgo,
+      installmentsPaid,
+      installments,
     };
   }
 
@@ -319,7 +360,7 @@ export class PostgresRepository {
         giftCard.reloadlyTransactionId,
         giftCard.productId,
         giftCard.productName,
-        giftCard.denomination,
+        this.encodeGiftCardDenomination(giftCard.denomination),
         giftCard.code,
         giftCard.pin,
         giftCard.purchasedAtUnix,
@@ -357,7 +398,7 @@ export class PostgresRepository {
       reloadlyTransactionId: row.reloadly_transaction_id,
       productId: row.product_id,
       productName: row.product_name,
-      denomination: row.denomination,
+      denomination: this.decodeGiftCardDenomination(row.denomination),
       code: row.code,
       pin: row.pin,
       purchasedAtUnix: row.purchased_at_unix,
@@ -393,7 +434,7 @@ export class PostgresRepository {
         gc.expires_at
       FROM gift_cards gc
       INNER JOIN payment_plans pp ON gc.plan_id = pp.plan_id
-      WHERE pp.wallet_address = $1
+      WHERE pp.borrower_wallet_address = $1
       ORDER BY gc.purchased_at_unix DESC`,
       [walletAddress]
     );
@@ -403,7 +444,7 @@ export class PostgresRepository {
       reloadlyTransactionId: row.reloadly_transaction_id,
       productId: row.product_id,
       productName: row.product_name,
-      denomination: row.denomination,
+      denomination: this.decodeGiftCardDenomination(row.denomination),
       code: row.code,
       pin: row.pin,
       purchasedAtUnix: row.purchased_at_unix,
@@ -523,32 +564,15 @@ export class PostgresRepository {
    * Updates personal information during onboarding or profile editing.
    */
   async updateUserProfile(walletAddress: string, profile: { name?: string; email?: string }): Promise<void> {
-    const fields: string[] = [];
-    const values: any[] = [];
-    let paramIndex = 1;
-
-    if (profile.name !== undefined) {
-      fields.push(`name = $${paramIndex++}`);
-      values.push(profile.name);
-    }
-
-    if (profile.email !== undefined) {
-      fields.push(`email = $${paramIndex++}`);
-      values.push(profile.email);
-    }
-
-    if (fields.length === 0) {
-      return; // Nothing to update
-    }
-
-    fields.push(`updated_at = now()`);
-    values.push(walletAddress);
-
     await this.pool.query(
-      `UPDATE users 
-       SET ${fields.join(', ')}
-       WHERE wallet_address = $${paramIndex}`,
-      values
+      `INSERT INTO users (wallet_address, tier, later_on_score, name, email)
+       VALUES ($1, 'NEW', 500, $2, $3)
+       ON CONFLICT (wallet_address)
+       DO UPDATE SET
+         name = CASE WHEN $2::TEXT IS NULL THEN users.name ELSE $2 END,
+         email = CASE WHEN $3::TEXT IS NULL THEN users.email ELSE $3 END,
+         updated_at = now()`,
+      [walletAddress, profile.name ?? null, profile.email ?? null]
     );
   }
 

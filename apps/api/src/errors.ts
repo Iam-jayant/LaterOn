@@ -52,3 +52,12 @@ export class BlockchainError extends AppError {
     super(message, "BLOCKCHAIN_ERROR", 502, detail);
   }
 }
+
+export class CheckoutRetryRequiredError extends AppError {
+  public constructor(
+    message = "Checkout approval became stale before confirmation. Please retry and sign the refreshed checkout.",
+    detail?: unknown
+  ) {
+    super(message, "CHECKOUT_RETRY_REQUIRED", 409, detail);
+  }
+}
