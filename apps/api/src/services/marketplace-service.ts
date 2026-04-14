@@ -545,18 +545,6 @@ export class MarketplaceService {
       );
     }
   }
-      logger.error("Gift card fulfillment failed after plan creation", {
-        planId: plan.planId,
-        quoteId,
-        error
-      });
-
-      // TODO: Implement rollback/refund logic
-      throw new Error(
-        `Payment received but gift card delivery failed. Contact support with transaction ID: ${plan.planId}`
-      );
-    }
-  }
 
   /**
    * Map Reloadly product to GiftCardProduct.
