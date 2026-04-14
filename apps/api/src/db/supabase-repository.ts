@@ -116,7 +116,14 @@ export class SupabaseRepository {
   async getPlansByWallet(walletAddress: string): Promise<PlanRecord[]> {
     const { data, error } = await this.supabase
       .from("payment_plans")
-      .select("*")
+      .select(`
+        *,
+        gift_cards (
+          product_id,
+          product_name,
+          denomination
+        )
+      `)
       .eq("borrower_wallet_address", walletAddress)
       .order("created_at", { ascending: false });
 
@@ -528,7 +535,7 @@ export class SupabaseRepository {
    * Map database row to PlanRecord domain object.
    */
   private mapPlan(row: any): PlanRecord {
-    return {
+    const plan: PlanRecord = {
       planId: row.plan_id,
       walletAddress: row.borrower_wallet_address,
       merchantId: row.merchant_id,
@@ -544,5 +551,17 @@ export class SupabaseRepository {
       installmentsPaid: row.installments_paid,
       installments: [],
     };
+    
+    // Add gift card details if available (from joined gift_cards table)
+    if (row.gift_cards && Array.isArray(row.gift_cards) && row.gift_cards.length > 0) {
+      const giftCard = row.gift_cards[0];
+      plan.giftCardDetails = {
+        productId: giftCard.product_id,
+        productName: giftCard.product_name,
+        denomination: giftCard.denomination
+      };
+    }
+    
+    return plan;
   }
 }

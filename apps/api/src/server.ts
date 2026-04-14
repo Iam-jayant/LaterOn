@@ -281,6 +281,15 @@ const createRoutes = (app: HonoApp): void => {
     const walletFromToken = resolveWalletFromAuth(c);
     assertWalletMatch(c, walletFromToken, query.data.walletAddress);
 
+    // If using Supabase repository, query directly from database
+    // Otherwise fall back to read model (in-memory)
+    if (c.var.ctx.repository) {
+      const plans = await c.var.ctx.repository.getPlansByWallet(query.data.walletAddress);
+      const user = await c.var.ctx.repository.getOrCreateUser(query.data.walletAddress);
+      return c.json({ plans, user });
+    }
+
+    // Fallback to in-memory read model
     await c.var.ctx.readModel.sync();
     return c.json({
       plans: c.var.ctx.readModel.getPlansByWallet(query.data.walletAddress),
