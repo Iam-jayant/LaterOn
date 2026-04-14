@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![LaterOn Logo](apps/web/public/images/logo.png)
+<img src="apps/web/public/images/logo.png" alt="LaterOn Logo" width="10%" />
 
 **Buy Now, Pay Later on the Blockchain**
 
