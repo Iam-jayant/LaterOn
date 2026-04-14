@@ -21,6 +21,8 @@ import { PRIMARY, BACKGROUND, TEXT, SUCCESS, ERROR } from '@/lib/colors';
 import Badge from '@/components/ui/Badge';
 import SkeletonLoader from '@/components/ui/SkeletonLoader';
 
+const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
+
 interface EMI {
   id: string;
   amount: number;
@@ -81,6 +83,9 @@ export default function DashboardPage() {
             capacityAlgo: 25,
             completedPlans: 0,
             activePlans: 0,
+            name: null,
+            email: null,
+            scoreAsaId: null,
           })),
           apiClient.getUserPlans(address, token).catch(() => []),
         ]);
@@ -90,7 +95,7 @@ export default function DashboardPage() {
         
         // Fetch gift card purchases
         try {
-          const userPurchases = await apiClient.getUserPurchases(token);
+          const userPurchases = token ? await apiClient.getUserPurchases(token) : [];
           setPurchases(userPurchases);
         } catch (err) {
           console.error('Failed to fetch purchases:', err);
@@ -98,8 +103,8 @@ export default function DashboardPage() {
         
         // Fetch DPDP data
         try {
-          const consent = await fetch('/api/consent/check', {
-            headers: { 'Authorization': `Bearer ${token}` }
+          const consent = await fetch(`${apiBase}/api/consent/check`, {
+            headers: token ? { 'Authorization': `Bearer ${token}` } : {}
           }).then(res => res.json());
           setConsentData(consent);
         } catch (err) {
@@ -117,9 +122,9 @@ export default function DashboardPage() {
 
         // Extract user profile data (name, email, score_asa_id)
         // Note: These fields need to be added to UserProfile type or fetched separately
-        setUserName((profile as any).name || null);
-        setUserEmail((profile as any).email || null);
-        setScoreAsaId((profile as any).scoreAsaId || null);
+        setUserName(profile.name ?? null);
+        setUserEmail(profile.email ?? null);
+        setScoreAsaId(profile.scoreAsaId ?? null);
 
         // Generate EMI list from plans
         const emis: EMI[] = [];
@@ -187,14 +192,13 @@ export default function DashboardPage() {
 
     try {
       const token = await ensureWalletToken(walletAddress!);
-      const res = await fetch('/api/user/me', { 
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-      
-      if (res.ok) {
+      if (!token) {
+        throw new Error('Missing auth token');
+      }
+
+      const res = await apiClient.deleteUserData(token);
+
+      if (res.success) {
         await walletService.disconnect();
         window.location.href = '/';
       } else {
@@ -1016,6 +1020,32 @@ export default function DashboardPage() {
                   boxShadow: '0 4px 16px rgba(10,12,18,0.06)',
                 }}
               >
+                <div style={{ marginBottom: '20px' }}>
+                  <p
+                    style={{
+                      fontFamily: "'Inter', sans-serif",
+                      fontSize: '13px',
+                      fontWeight: 600,
+                      color: `${TEXT}80`,
+                      margin: '0 0 8px',
+                    }}
+                  >
+                    LaterOn Score
+                  </p>
+                  <p
+                    style={{
+                      fontFamily: "'Space Grotesk', sans-serif",
+                      fontSize: '28px',
+                      fontWeight: 700,
+                      color: TEXT,
+                      margin: 0,
+                      letterSpacing: '-0.5px',
+                    }}
+                  >
+                    {userProfile?.laterOnScore ?? 500}
+                  </p>
+                </div>
+
                 <div style={{ marginBottom: '20px' }}>
                   <p
                     style={{

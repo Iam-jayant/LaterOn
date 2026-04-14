@@ -15,8 +15,7 @@ export const ALGO_TO_INR = 80;
  * Currently returns fallback as merchantId doesn't map to product names yet
  */
 export function getProductName(plan: Plan): string {
-  // Future: derive from merchantId lookup
-  return 'Purchase';
+  return plan.productName || 'Purchase';
 }
 
 /**
@@ -24,6 +23,10 @@ export function getProductName(plan: Plan): string {
  * Finds the first unpaid installment or returns the last installment date
  */
 export function getNextEmiDate(plan: Plan): Date {
+  if (plan.installments.length === 0) {
+    return new Date(plan.nextDueAtUnix * 1000);
+  }
+
   const nextUnpaid = plan.installments.find(
     (inst) => inst.installmentNumber > plan.installmentsPaid
   );
@@ -48,7 +51,9 @@ export function getRemainingAmountInr(plan: Plan): number {
  * Calculate progress percentage based on installments paid
  */
 export function getProgressPercentage(plan: Plan): number {
-  if (plan.installments.length === 0) return 0;
+  if (plan.installments.length === 0) {
+    return Math.round((plan.installmentsPaid / Math.max(plan.tenureMonths, 1)) * 100);
+  }
   return Math.round((plan.installmentsPaid / plan.installments.length) * 100);
 }
 

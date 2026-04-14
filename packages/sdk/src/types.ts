@@ -25,6 +25,9 @@ export interface UserProfile {
   activeOutstandingInr: number;
   bannedUntilUnix?: number;
   laterOnScore: number;
+  scoreAsaId?: number;
+  name?: string | null;
+  email?: string | null;
 }
 
 export interface CheckoutQuote {

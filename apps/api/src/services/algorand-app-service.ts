@@ -1,6 +1,11 @@
 import algosdk from "algosdk";
 import type { ApiConfig } from "../config";
 import { AtomicTxBuilder } from "./atomic-tx-builder";
+import { logger } from "../lib/logger";
+import {
+  buildMarketplacePlanBoxWindow,
+  MARKETPLACE_PLAN_BOX_LOOKAHEAD
+} from "./marketplace-checkout-boxes";
 
 export interface ChainTxResult {
   txId: string;
@@ -131,6 +136,17 @@ export class AlgorandAppService {
     return this.callNoOp(this.config.poolAppId, "set_paused", [algosdk.encodeUint64(paused ? 1 : 0)]);
   }
 
+  public async getCurrentBnplPlanCounter(): Promise<number> {
+    const appInfo = await this.algod.getApplicationByID(this.config.bnplAppId).do();
+    const globalState = (appInfo.params as { ["global-state"]?: Array<{
+      key: string;
+      value: { uint?: number };
+    }> })["global-state"];
+    const planCounterKey = Buffer.from("pc").toString("base64");
+    const planCounterState = globalState?.find((kv) => kv.key === planCounterKey);
+    return planCounterState?.value.uint ?? 0;
+  }
+
   /**
    * Build unsigned marketplace transactions for frontend signing.
    * Returns atomic group of 3 UNSIGNED transactions.
@@ -156,9 +172,15 @@ export class AlgorandAppService {
       throw new Error("Relayer account not configured");
     }
 
+    if (this.signer.sender !== this.config.lendingPoolAddress) {
+      throw new Error("Relayer account must match LENDING_POOL_ADDRESS for marketplace checkout");
+    }
+
     // Calculate amounts
     const totalMicroAlgo = Math.round(totalAmountAlgo * 1_000_000);
-    const firstEmiMicroAlgo = Math.round((totalAmountAlgo / 3) * 1_000_000);
+    const firstEmiMicroAlgo = Math.round(
+      (totalAmountAlgo / this.config.marketplaceTenureMonths) * 1_000_000
+    );
     
     // Calculate next due date (30 days from now)
     const nextDueUnix = Math.floor(Date.now() / 1000) + (30 * 24 * 60 * 60);
@@ -178,15 +200,15 @@ export class AlgorandAppService {
       suggestedParams,
     });
 
-    // Transaction 1: Pool pays full amount to merchant
+    // Transaction 1: Pool pays the full amount to the marketplace merchant.
     const poolPaymentTx = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
       sender: this.signer.sender,
       receiver: merchantAddress,
       amount: totalMicroAlgo,
       note: new Uint8Array(Buffer.from(JSON.stringify({
-        type: 'MARKETPLACE_BNPL_FULL',
+        type: "MARKETPLACE_BNPL_FULL",
         totalAmount: totalAmountAlgo,
-        version: '2.0'
+        version: "2.1"
       }))),
       suggestedParams,
     });
@@ -203,53 +225,41 @@ export class AlgorandAppService {
       new Uint8Array([tierAtApproval])
     ];
 
-    // Box references for the smart contract
-    // The contract needs access to: user box (read/write) and plan box (create)
-    const userBoxName = Buffer.concat([
-      Buffer.from("user_"),
-      algosdk.decodeAddress(borrowerAddress).publicKey
-    ]);
-    
-    // Get current plan counter to predict next plan ID
-    let nextPlanId = 1; // Default to 1 if we can't read it
+    // Box references for the smart contract.
+    // We authorize a forward window of future plan boxes so the checkout can
+    // survive unrelated plan creations between prepare and confirm.
+    let currentPlanCounter = 0;
     try {
-      const appInfo = await this.algod.getApplicationByID(this.config.bnplAppId).do();
-      const globalState = appInfo.params['global-state'];
-      const planCounterKey = Buffer.from("pc").toString('base64'); // "pc" = plan counter
-      const planCounterState = globalState?.find((kv: any) => kv.key === planCounterKey);
-      if (planCounterState) {
-        nextPlanId = planCounterState.value.uint + 1;
-      }
+      currentPlanCounter = await this.getCurrentBnplPlanCounter();
+      logger.info("Read plan counter from contract", {
+        currentCounter: currentPlanCounter,
+        nextPlanId: currentPlanCounter + 1,
+        bnplAppId: this.config.bnplAppId
+      });
     } catch (error) {
-      // If we can't read the counter, use 1 as default
-      console.warn("Could not read plan counter, using default", error);
+      logger.warn("Could not read plan counter, using default", { error, nextPlanId: 1 });
     }
-    
-    // Create plan box name: "plan_" + plan_id (8 bytes)
-    const planIdBytes = Buffer.alloc(8);
-    planIdBytes.writeBigUInt64BE(BigInt(nextPlanId));
-    const planBoxName = Buffer.concat([
-      Buffer.from("plan_"),
-      planIdBytes
-    ]);
-    
-    const boxReferences = [
-      {
-        appIndex: this.config.bnplAppId,
-        name: userBoxName
-      },
-      {
-        appIndex: this.config.bnplAppId,
-        name: planBoxName
-      }
-    ];
+
+    const nextPlanId = currentPlanCounter + 1;
+    const planBoxWindow = buildMarketplacePlanBoxWindow(
+      this.config.bnplAppId,
+      borrowerAddress,
+      nextPlanId
+    );
+
+    logger.info("Box references for transaction", {
+      userBoxName: Buffer.from(planBoxWindow.userBoxName).toString("hex"),
+      firstPlanId: planBoxWindow.firstPlanId,
+      lastPlanId: planBoxWindow.lastPlanId,
+      planBoxCount: MARKETPLACE_PLAN_BOX_LOOKAHEAD
+    });
 
     const appCallTx = algosdk.makeApplicationNoOpTxnFromObject({
       appIndex: this.config.bnplAppId,
       sender: this.signer.sender,
       suggestedParams,
       appArgs,
-      boxes: boxReferences
+      boxes: planBoxWindow.boxReferences
     });
 
     // Group transactions

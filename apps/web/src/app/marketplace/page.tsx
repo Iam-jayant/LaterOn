@@ -185,8 +185,8 @@ export default function MarketplacePage() {
   };
 
   const handleCheckoutSuccess = (): void => {
-    setSelectedProduct(null);
-    setSelectedDenomination(null);
+    // Keep the modal mounted so it can render the success state with the
+    // delivered gift card details. The parent cleanup happens on modal close.
   };
 
   const handleDisconnect = async (): Promise<void> => {
