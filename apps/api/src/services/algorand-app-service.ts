@@ -133,16 +133,14 @@ export class AlgorandAppService {
 
   /**
    * Build unsigned marketplace transactions for frontend signing.
-   * Returns atomic group of 3 transactions:
-   * - Txn 0: User → Pool (1st EMI)
-   * - Txn 1: Pool → Merchant (full amount, will be signed by relayer)
-   * - Txn 2: BNPL contract call (create_plan)
+   * Returns atomic group of 3 UNSIGNED transactions.
+   * User will sign Txn 0, backend will sign Txn 1 & 2 during confirm.
    * 
    * @param borrowerAddress - User's wallet address
    * @param totalAmountAlgo - Total order amount in ALGO
    * @param merchantAddress - Merchant's Algorand address
    * @param tierAtApproval - User's tier (0=NEW, 1=EMERGING, 2=TRUSTED)
-   * @returns Array of base64-encoded unsigned transactions (user only signs Txn 0)
+   * @returns Array of 3 base64-encoded UNSIGNED transactions (all unsigned for group validation)
    */
   public async buildMarketplaceTransactions(
     borrowerAddress: string,
@@ -180,7 +178,7 @@ export class AlgorandAppService {
       suggestedParams,
     });
 
-    // Transaction 1: Pool pays full amount to merchant (signed by relayer)
+    // Transaction 1: Pool pays full amount to merchant
     const poolPaymentTx = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
       sender: this.signer.sender,
       receiver: merchantAddress,
@@ -205,26 +203,64 @@ export class AlgorandAppService {
       new Uint8Array([tierAtApproval])
     ];
 
+    // Box references for the smart contract
+    // The contract needs access to: user box (read/write) and plan box (create)
+    const userBoxName = Buffer.concat([
+      Buffer.from("user_"),
+      algosdk.decodeAddress(borrowerAddress).publicKey
+    ]);
+    
+    // Get current plan counter to predict next plan ID
+    let nextPlanId = 1; // Default to 1 if we can't read it
+    try {
+      const appInfo = await this.algod.getApplicationByID(this.config.bnplAppId).do();
+      const globalState = appInfo.params['global-state'];
+      const planCounterKey = Buffer.from("pc").toString('base64'); // "pc" = plan counter
+      const planCounterState = globalState?.find((kv: any) => kv.key === planCounterKey);
+      if (planCounterState) {
+        nextPlanId = planCounterState.value.uint + 1;
+      }
+    } catch (error) {
+      // If we can't read the counter, use 1 as default
+      console.warn("Could not read plan counter, using default", error);
+    }
+    
+    // Create plan box name: "plan_" + plan_id (8 bytes)
+    const planIdBytes = Buffer.alloc(8);
+    planIdBytes.writeBigUInt64BE(BigInt(nextPlanId));
+    const planBoxName = Buffer.concat([
+      Buffer.from("plan_"),
+      planIdBytes
+    ]);
+    
+    const boxReferences = [
+      {
+        appIndex: this.config.bnplAppId,
+        name: userBoxName
+      },
+      {
+        appIndex: this.config.bnplAppId,
+        name: planBoxName
+      }
+    ];
+
     const appCallTx = algosdk.makeApplicationNoOpTxnFromObject({
       appIndex: this.config.bnplAppId,
       sender: this.signer.sender,
       suggestedParams,
-      appArgs
+      appArgs,
+      boxes: boxReferences
     });
 
     // Group transactions
     const txGroup = [userPaymentTx, poolPaymentTx, appCallTx];
     algosdk.assignGroupID(txGroup);
 
-    // Sign transactions 1 and 2 with relayer (backend)
-    const signedPoolPayment = poolPaymentTx.signTxn(this.signer.privateKey);
-    const signedAppCall = appCallTx.signTxn(this.signer.privateKey);
-
-    // Return: Txn 0 unsigned (for user), Txn 1 & 2 signed (by relayer)
+    // Return ALL 3 as UNSIGNED (user will sign Txn 0, backend will sign Txn 1 & 2 later)
     return [
       Buffer.from(algosdk.encodeUnsignedTransaction(userPaymentTx)).toString('base64'),
-      Buffer.from(signedPoolPayment).toString('base64'),
-      Buffer.from(signedAppCall).toString('base64')
+      Buffer.from(algosdk.encodeUnsignedTransaction(poolPaymentTx)).toString('base64'),
+      Buffer.from(algosdk.encodeUnsignedTransaction(appCallTx)).toString('base64')
     ];
   }
 

@@ -168,28 +168,112 @@ export class WalletService {
       throw new Error("No wallet connected");
     }
     
+    if (!this.connectedAddress) {
+      throw new Error("No wallet address available");
+    }
+    
     await this.ensureWallets();
+    
+    const userAddress = this.connectedAddress;
+    
+    // Helper function to safely get sender address from transaction
+    const getTxnSender = (txn: algosdk.Transaction): string => {
+      try {
+        // Try multiple ways to get the sender address
+        const txnObj = txn as any;
+        
+        // Method 1: Check 'from' property (common in algosdk)
+        if (txnObj.from) {
+          return typeof txnObj.from === 'string' ? txnObj.from : txnObj.from.toString();
+        }
+        
+        // Method 2: Check 'sender' property
+        if (txnObj.sender) {
+          // If sender is an Address object with publicKey
+          if (txnObj.sender.publicKey) {
+            return algosdk.encodeAddress(txnObj.sender.publicKey);
+          }
+          // If sender is already a string
+          if (typeof txnObj.sender === 'string') {
+            return txnObj.sender;
+          }
+        }
+        
+        // Method 3: Try to get it from the encoded transaction
+        const encoded = algosdk.encodeUnsignedTransaction(txn);
+        const decoded = algosdk.decodeUnsignedTransaction(encoded);
+        if ((decoded as any).from) {
+          return (decoded as any).from.toString();
+        }
+        
+        console.error("Could not extract sender from transaction:", txnObj);
+        return "";
+      } catch (error) {
+        console.error("Error extracting sender from transaction:", error);
+        return "";
+      }
+    };
     
     switch (this.connectedWallet) {
       case "lute": {
-        // Lute expects WalletTransaction[] with base64 encoded txns
-        const walletTxns = txns.map((txn) => ({
-          txn: Buffer.from(algosdk.encodeUnsignedTransaction(txn)).toString("base64"),
-        }));
+        const walletTxns = txns.map((txn) => {
+          const txnSender = getTxnSender(txn);
+          const shouldSign = txnSender === userAddress;
+          
+          return {
+            txn: Buffer.from(algosdk.encodeUnsignedTransaction(txn)).toString("base64"),
+            signers: shouldSign ? undefined : [],
+          };
+        });
+        
         const signedTxns = await this.luteWallet.signTxns(walletTxns);
-        // Filter out null values and return Uint8Array[]
-        return signedTxns.filter((txn: any): txn is Uint8Array => txn !== null);
+        return signedTxns.map((signedTxn: Uint8Array | null, index: number) => {
+          return signedTxn || algosdk.encodeUnsignedTransaction(txns[index]);
+        });
       }
+      
       case "pera": {
-        // Pera expects SignerTransaction[][] (array of groups)
-        const signerTxns = txns.map((txn) => ({ txn }));
-        return await this.peraWallet.signTransaction([signerTxns]);
+        const signerTxns = txns.map((txn) => {
+          const txnSender = getTxnSender(txn);
+          const shouldSign = txnSender === userAddress;
+          return shouldSign ? { txn } : { txn, signers: [] };
+        });
+        
+        const signedTxns = await this.peraWallet.signTransaction([signerTxns]);
+        
+        let signedIndex = 0;
+        return txns.map((txn) => {
+          const txnSender = getTxnSender(txn);
+          const shouldSign = txnSender === userAddress;
+          
+          if (shouldSign) {
+            return signedTxns[signedIndex++];
+          }
+          return algosdk.encodeUnsignedTransaction(txn);
+        });
       }
+      
       case "defly": {
-        // Defly expects SignerTransaction[][] (array of groups)
-        const signerTxns = txns.map((txn) => ({ txn }));
-        return await this.deflyWallet.signTransaction([signerTxns]);
+        const signerTxns = txns.map((txn) => {
+          const txnSender = getTxnSender(txn);
+          const shouldSign = txnSender === userAddress;
+          return shouldSign ? { txn } : { txn, signers: [] };
+        });
+        
+        const signedTxns = await this.deflyWallet.signTransaction([signerTxns]);
+        
+        let signedIndex = 0;
+        return txns.map((txn) => {
+          const txnSender = getTxnSender(txn);
+          const shouldSign = txnSender === userAddress;
+          
+          if (shouldSign) {
+            return signedTxns[signedIndex++];
+          }
+          return algosdk.encodeUnsignedTransaction(txn);
+        });
       }
+      
       default:
         throw new Error(`Unknown wallet type: ${this.connectedWallet}`);
     }

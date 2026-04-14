@@ -98,7 +98,7 @@ const registerCatalogRoute = (app: HonoApp): void => {
 const quoteRequestSchema = z.object({
   walletAddress: z.string().min(8),
   productId: z.number().int().positive(),
-  denomination: z.number().int().positive()
+  denomination: z.number().positive() // Allow decimals for gift card denominations like 11.99
 });
 
 const registerQuoteRoute = (app: HonoApp): void => {
@@ -475,6 +475,20 @@ const registerCheckoutConfirmRoute = (app: HonoApp): void => {
               code: "QUOTE_EXPIRED",
               message: "Quote expired. Please create a new quote.",
               details: null
+            }
+          }, 400);
+        }
+
+        if (error.message.includes("balance") && error.message.includes("below min")) {
+          // Extract account address from error message
+          const accountMatch = error.message.match(/account ([A-Z0-9]+) balance/);
+          const account = accountMatch ? accountMatch[1] : "your account";
+          
+          return c.json({
+            error: {
+              code: "INSUFFICIENT_BALANCE",
+              message: `Insufficient ALGO balance. ${account === "your account" ? "Your wallet" : "Account"} needs at least 0.2 ALGO to cover transaction fees and minimum balance requirements. Please fund your wallet with testnet ALGO from https://bank.testnet.algorand.network/`,
+              details: { account }
             }
           }, 400);
         }

@@ -152,11 +152,20 @@ export function GiftCardCheckoutModal({
 
       // Step 2: Decode unsigned transactions
       console.log("Step 2: Decoding unsigned transactions...");
+      console.log("Raw transactions from backend:", prepareData.transactions);
+      
       const { decodeUnsignedTransactions } = await import("@/lib/transaction-signer");
       const unsignedTxns = decodeUnsignedTransactions(prepareData.transactions);
+      
       console.log("Decoded transactions:", unsignedTxns.length, "transactions");
-      console.log("First transaction genesisHash:", unsignedTxns[0]?.genesisHash);
-      console.log("First transaction genesisID:", unsignedTxns[0]?.genesisID);
+      console.log("Transaction objects:", unsignedTxns.map((txn, i) => ({
+        index: i,
+        type: (txn as any).type,
+        from: (txn as any).from,
+        sender: (txn as any).sender,
+        genesisID: txn.genesisID,
+        genesisHash: txn.genesisHash
+      })));
       
       // Step 3: Sign transactions with wallet (without submitting)
       console.log("Step 3: Signing transactions with wallet...");
@@ -186,6 +195,10 @@ export function GiftCardCheckoutModal({
       if (!confirmResponse.ok) {
         const errorData = await confirmResponse.json() as { error?: { message?: string; code?: string } };
         console.error("Confirm checkout error:", errorData);
+        
+        if (errorData.error?.code === "INSUFFICIENT_BALANCE") {
+          throw new Error(errorData.error.message || "Insufficient ALGO balance. Please fund your wallet.");
+        }
         
         if (errorData.error?.code === "FULFILLMENT_FAILED") {
           throw new Error(errorData.error.message || "Gift card delivery failed");
