@@ -143,37 +143,35 @@ export class AlgorandAppService {
     borrowerAddress: string,
     financedAmountAlgo: number
   ): Promise<string[]> {
-    // Marketplace transactions don't need relayer - user signs them
-    // Only check if chain is enabled and app IDs are configured
-    if (!this.config.chainEnabled || this.config.bnplAppId <= 0) {
+    // Simple architecture: User pays full amount to pool
+    // Backend will handle merchant payment after confirmation
+    
+    if (!this.config.chainEnabled) {
       throw new Error("Blockchain service not properly configured");
     }
 
-    // Calculate first installment (1/3 of total for 3-month tenure)
-    const firstInstallmentAlgo = financedAmountAlgo / 3;
-    const firstInstallmentMicroAlgo = Math.round(firstInstallmentAlgo * 1_000_000);
     const totalAmountMicroAlgo = Math.round(financedAmountAlgo * 1_000_000);
 
-    // Calculate next due date (30 days from now)
-    const nextDueUnix = Math.floor(Date.now() / 1000) + (30 * 24 * 60 * 60);
-
-    // Generate plan ID (simple incrementing ID for now)
+    // Generate unique plan ID for tracking
     const planId = Date.now();
 
-    // Build atomic transaction group
-    const txGroup = await this.txBuilder.buildMarketplaceGroup({
-      borrowerAddress,
-      lendingPoolAddress: this.config.lendingPoolAddress,
-      merchantAddress: this.config.lendingPoolAddress, // For marketplace, merchant is the pool
-      firstInstallmentMicroAlgo,
-      totalAmountMicroAlgo,
-      nextDueUnix,
-      tierAtApproval: 0, // NEW tier
-      planId
+    const suggestedParams = await this.algod.getTransactionParams().do();
+
+    // Single payment: User pays full amount to pool
+    const paymentTx = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
+      sender: borrowerAddress,
+      receiver: this.config.lendingPoolAddress,
+      amount: totalAmountMicroAlgo,
+      note: new Uint8Array(Buffer.from(JSON.stringify({
+        type: 'MARKETPLACE_BNPL',
+        planId: `plan_${planId}`,
+        version: '1.0'
+      }))),
+      suggestedParams,
     });
 
-    // Convert transactions to base64
-    return txGroup.map(tx => Buffer.from(algosdk.encodeUnsignedTransaction(tx)).toString('base64'));
+    // Return single transaction
+    return [Buffer.from(algosdk.encodeUnsignedTransaction(paymentTx)).toString('base64')];
   }
 
   /**
@@ -196,6 +194,57 @@ export class AlgorandAppService {
 
     // Submit transaction group
     const sendResult = await this.algod.sendRawTransaction(signedTxnBlobs).do();
+    const txId = sendResult.txid;
+
+    // Wait for confirmation
+    await algosdk.waitForConfirmation(
+      this.algod,
+      txId,
+      this.config.chainWaitRounds
+    );
+
+    return txId;
+  }
+
+  /**
+   * Send payment from pool to merchant using relayer account.
+   * This is called after user payment is confirmed.
+   * 
+   * @param merchantAddress - Merchant's Algorand address
+   * @param amountAlgo - Amount to send in ALGO
+   * @param note - Optional transaction note
+   * @returns Transaction ID
+   */
+  public async sendPoolPaymentToMerchant(
+    merchantAddress: string,
+    amountAlgo: number,
+    note?: string
+  ): Promise<string> {
+    if (!this.config.chainEnabled) {
+      throw new Error("Blockchain service not enabled");
+    }
+
+    if (!this.signer) {
+      throw new Error("Relayer account not configured. Set RELAYER_PRIVATE_KEY or RELAYER_MNEMONIC in .env");
+    }
+
+    const amountMicroAlgo = Math.round(amountAlgo * 1_000_000);
+    const suggestedParams = await this.algod.getTransactionParams().do();
+
+    // Create payment transaction from pool to merchant
+    const paymentTx = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
+      sender: this.signer.sender,
+      receiver: merchantAddress,
+      amount: amountMicroAlgo,
+      note: note ? new Uint8Array(Buffer.from(note)) : undefined,
+      suggestedParams,
+    });
+
+    // Sign with relayer (pool) private key
+    const signedTx = paymentTx.signTxn(this.signer.privateKey);
+
+    // Submit transaction
+    const sendResult = await this.algod.sendRawTransaction(signedTx).do();
     const txId = sendResult.txid;
 
     // Wait for confirmation

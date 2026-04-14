@@ -2,10 +2,12 @@
 
 import type { PlanRecord, UserProfile } from "@lateron/sdk";
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { useWallet } from "../../hooks/useWallet";
 import { WalletModal } from "../../components/wallet-modal";
 import { buildAuthHeaders, createIdempotencyKey } from "../../lib/auth";
 import { signAndSubmit, decodeUnsignedTransactions } from "../../lib/transaction-signer";
+import { apiClient } from "../../lib/api";
 
 const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
 
@@ -35,12 +37,20 @@ interface GiftCardDetailsResponse {
   };
 }
 
+interface DataAccessLogEntry {
+  operation: string;
+  accessedBy: string;
+  accessedAt: string;
+}
+
 export default function DashboardPage() {
-  const { address: walletAddress } = useWallet();
+  const router = useRouter();
+  const { address: walletAddress, disconnect } = useWallet();
   const [isWalletModalOpen, setIsWalletModalOpen] = useState(false);
   const [plans, setPlans] = useState<PlanRecord[]>([]);
   const [tier, setTier] = useState<string>("NEW");
   const [laterOnScore, setLaterOnScore] = useState<number>(500);
+  const [scoreAsaId, setScoreAsaId] = useState<number | null>(null);
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [processingPlanId, setProcessingPlanId] = useState<string | null>(null);
@@ -48,11 +58,19 @@ export default function DashboardPage() {
   const [giftCardDetails, setGiftCardDetails] = useState<GiftCardDetailsResponse["giftCard"] | null>(null);
   const [giftCardLoading, setGiftCardLoading] = useState(false);
   const [giftCardError, setGiftCardError] = useState<string | null>(null);
+  
+  // Off-Chain section state
+  const [dataAccessLogs, setDataAccessLogs] = useState<DataAccessLogEntry[]>([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [logsError, setLogsError] = useState<string | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Fetch plans on load when wallet is connected (Requirement 4.1)
   useEffect(() => {
     if (walletAddress) {
       void loadPlans();
+      void loadDataAccessLogs();
     }
   }, [walletAddress]);
 
@@ -80,10 +98,50 @@ export default function DashboardPage() {
       setPlans(data.plans);
       setTier(data.user.tier);
       setLaterOnScore(data.user.laterOnScore ?? 500);
+      // Mock score ASA ID for now (can be fetched from user profile when backend is ready)
+      setScoreAsaId(data.user.laterOnScore ? 123456789 : null);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to load plans");
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const loadDataAccessLogs = async (): Promise<void> => {
+    if (!walletAddress) return;
+    
+    setLogsLoading(true);
+    setLogsError(null);
+    
+    try {
+      const authHeaders = await buildAuthHeaders(walletAddress);
+      const authToken = authHeaders.authorization?.replace("Bearer ", "") ?? "";
+      const logs = await apiClient.getDataAccessLog(authToken);
+      setDataAccessLogs(logs);
+    } catch (error) {
+      setLogsError(error instanceof Error ? error.message : "Failed to load data access logs");
+    } finally {
+      setLogsLoading(false);
+    }
+  };
+
+  const handleDeleteUserData = async (): Promise<void> => {
+    if (!walletAddress) return;
+    
+    setIsDeleting(true);
+    setMessage("");
+    
+    try {
+      const authHeaders = await buildAuthHeaders(walletAddress);
+      const authToken = authHeaders.authorization?.replace("Bearer ", "") ?? "";
+      await apiClient.deleteUserData(authToken);
+      
+      // Disconnect wallet and navigate to landing
+      await disconnect();
+      router.push("/");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to delete user data");
+      setIsDeleting(false);
     }
   };
 
@@ -365,10 +423,255 @@ export default function DashboardPage() {
         </section>
       )}
 
+      {/* On-Chain Section (Task 9.1) */}
+      {walletAddress && (
+        <section className="card" style={{ marginTop: 20 }}>
+          <div className="eyebrow">On-Chain (Algorand - Immutable)</div>
+          <h2 style={{ marginTop: 10 }}>Blockchain Records</h2>
+          <p style={{ marginTop: 6, fontSize: "14px", color: "#666" }}>
+            Immutable records stored on the Algorand blockchain
+          </p>
+
+          {/* Score ASA Display */}
+          <div style={{ marginTop: 16, padding: 16, backgroundColor: "#f5f6f0", borderRadius: 8 }}>
+            <h3 style={{ fontSize: "16px", marginBottom: 8 }}>Score ASA (Algorand Standard Asset)</h3>
+            {scoreAsaId ? (
+              <div>
+                <p style={{ marginBottom: 4 }}>
+                  <strong>Asset ID:</strong> {scoreAsaId}
+                </p>
+                <p style={{ marginBottom: 4 }}>
+                  <strong>Current Score:</strong> {laterOnScore}
+                </p>
+                <p style={{ marginBottom: 4 }}>
+                  <strong>Tier:</strong> {tier}
+                </p>
+                <a
+                  href={`https://testnet.algoexplorer.io/asset/${scoreAsaId}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: "#6b7a00", textDecoration: "underline", fontSize: "14px" }}
+                >
+                  View on AlgoExplorer →
+                </a>
+              </div>
+            ) : (
+              <p style={{ fontSize: "14px", color: "#666" }}>No Score ASA minted yet</p>
+            )}
+          </div>
+
+          {/* BNPL Payment Plans */}
+          <div style={{ marginTop: 16, padding: 16, backgroundColor: "#f5f6f0", borderRadius: 8 }}>
+            <h3 style={{ fontSize: "16px", marginBottom: 8 }}>BNPL Payment Plans</h3>
+            {plans.length > 0 ? (
+              <div style={{ fontSize: "14px" }}>
+                {plans.map((plan) => (
+                  <div key={plan.planId} style={{ marginBottom: 12, paddingBottom: 12, borderBottom: "1px solid #ddd" }}>
+                    <p style={{ marginBottom: 4 }}>
+                      <strong>Plan ID:</strong> {plan.planId}
+                    </p>
+                    <p style={{ marginBottom: 4 }}>
+                      <strong>Status:</strong> {plan.status}
+                    </p>
+                    <p style={{ marginBottom: 4 }}>
+                      <strong>Created:</strong> {new Date(plan.createdAtUnix * 1000).toLocaleString()}
+                    </p>
+                    <p style={{ fontSize: "12px", color: "#666" }}>
+                      On-chain transaction IDs available in plan details
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p style={{ fontSize: "14px", color: "#666" }}>No payment plans yet</p>
+            )}
+          </div>
+
+          {/* Consent Transaction (mocked for MVP) */}
+          <div style={{ marginTop: 16, padding: 16, backgroundColor: "#f5f6f0", borderRadius: 8 }}>
+            <h3 style={{ fontSize: "16px", marginBottom: 8 }}>Consent Transaction</h3>
+            <p style={{ marginBottom: 4, fontSize: "14px" }}>
+              <strong>Purpose:</strong> Credit Scoring & Wallet Analysis
+            </p>
+            <p style={{ marginBottom: 4, fontSize: "14px", color: "#666" }}>
+              Transaction ID: (Available after onboarding flow)
+            </p>
+          </div>
+        </section>
+      )}
+
+      {/* Off-Chain Section (Task 9.2) */}
+      {walletAddress && (
+        <section className="card" style={{ marginTop: 20 }}>
+          <div className="eyebrow">Off-Chain (Encrypted - DPDP)</div>
+          <h2 style={{ marginTop: 10 }}>Personal Data & Privacy</h2>
+          <p style={{ marginTop: 6, fontSize: "14px", color: "#666" }}>
+            Your personal information protected under DPDP Act 2023
+          </p>
+
+          {/* User Profile (editable - placeholder for now) */}
+          <div style={{ marginTop: 16, padding: 16, backgroundColor: "#f5f6f0", borderRadius: 8 }}>
+            <h3 style={{ fontSize: "16px", marginBottom: 8 }}>Profile Information</h3>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: "block", marginBottom: 4, fontSize: "14px", fontWeight: "bold" }}>
+                Name
+              </label>
+              <input
+                type="text"
+                placeholder="Not set"
+                disabled
+                style={{ width: "100%", padding: 8, backgroundColor: "#fff", border: "1px solid #ddd", borderRadius: 4 }}
+              />
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: "block", marginBottom: 4, fontSize: "14px", fontWeight: "bold" }}>
+                Email
+              </label>
+              <input
+                type="email"
+                placeholder="Not set"
+                disabled
+                style={{ width: "100%", padding: 8, backgroundColor: "#fff", border: "1px solid #ddd", borderRadius: 4 }}
+              />
+            </div>
+            <p style={{ fontSize: "12px", color: "#666" }}>
+              Profile editing will be available after onboarding flow implementation
+            </p>
+          </div>
+
+          {/* Data Access Log */}
+          <div style={{ marginTop: 16, padding: 16, backgroundColor: "#f5f6f0", borderRadius: 8 }}>
+            <h3 style={{ fontSize: "16px", marginBottom: 8 }}>Data Access Log</h3>
+            {logsLoading ? (
+              <p style={{ fontSize: "14px", color: "#666" }}>Loading access logs...</p>
+            ) : logsError ? (
+              <p style={{ fontSize: "14px", color: "#cc0000" }}>{logsError}</p>
+            ) : dataAccessLogs.length > 0 ? (
+              <table style={{ width: "100%", fontSize: "14px", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr style={{ borderBottom: "2px solid #ddd" }}>
+                    <th style={{ textAlign: "left", padding: "8px 4px" }}>Operation</th>
+                    <th style={{ textAlign: "left", padding: "8px 4px" }}>Accessed By</th>
+                    <th style={{ textAlign: "left", padding: "8px 4px" }}>Timestamp</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dataAccessLogs.map((log, index) => (
+                    <tr key={index} style={{ borderBottom: "1px solid #eee" }}>
+                      <td style={{ padding: "8px 4px" }}>{log.operation}</td>
+                      <td style={{ padding: "8px 4px" }}>{log.accessedBy}</td>
+                      <td style={{ padding: "8px 4px" }}>
+                        {new Date(log.accessedAt).toLocaleString()}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <p style={{ fontSize: "14px", color: "#666" }}>No data access logs yet</p>
+            )}
+          </div>
+
+          {/* Data Deletion */}
+          <div style={{ marginTop: 16, padding: 16, backgroundColor: "#fff3cd", borderRadius: 8, border: "1px solid #ffc107" }}>
+            <h3 style={{ fontSize: "16px", marginBottom: 8, color: "#856404" }}>Right to Erasure</h3>
+            <p style={{ fontSize: "14px", marginBottom: 12, color: "#856404" }}>
+              You have the right to request deletion of your personal data under DPDP Act 2023.
+              This action will permanently delete your account and all associated data.
+            </p>
+            <button
+              type="button"
+              onClick={() => setShowDeleteConfirm(true)}
+              disabled={isDeleting}
+              style={{
+                backgroundColor: "#cc0000",
+                color: "#fff",
+                border: "none",
+                padding: "10px 16px",
+                borderRadius: 4,
+                cursor: isDeleting ? "not-allowed" : "pointer",
+                opacity: isDeleting ? 0.6 : 1
+              }}
+            >
+              {isDeleting ? "Deleting..." : "Request Data Deletion"}
+            </button>
+          </div>
+        </section>
+      )}
+
       <WalletModal 
         isOpen={isWalletModalOpen} 
         onClose={() => setIsWalletModalOpen(false)} 
       />
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && (
+        <div 
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(0, 0, 0, 0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000
+          }}
+          onClick={() => setShowDeleteConfirm(false)}
+        >
+          <div 
+            className="card"
+            style={{
+              maxWidth: "500px",
+              width: "90%",
+              backgroundColor: "#fff"
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 style={{ color: "#cc0000" }}>Confirm Data Deletion</h2>
+            <p style={{ marginTop: 12, fontSize: "14px" }}>
+              Are you sure you want to delete all your data? This action cannot be undone.
+            </p>
+            <p style={{ marginTop: 8, fontSize: "14px", fontWeight: "bold" }}>
+              This will:
+            </p>
+            <ul style={{ marginTop: 8, fontSize: "14px", paddingLeft: 20 }}>
+              <li>Delete your user profile</li>
+              <li>Mark all payment plans as DELETED</li>
+              <li>Remove all consent records</li>
+              <li>Delete all data access logs</li>
+              <li>Disconnect your wallet</li>
+            </ul>
+            <div style={{ marginTop: 16, display: "flex", gap: 12 }}>
+              <button
+                type="button"
+                onClick={() => setShowDeleteConfirm(false)}
+                style={{ flex: 1 }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDeleteConfirm(false);
+                  void handleDeleteUserData();
+                }}
+                disabled={isDeleting}
+                style={{
+                  flex: 1,
+                  backgroundColor: "#cc0000",
+                  color: "#fff",
+                  border: "none"
+                }}
+              >
+                {isDeleting ? "Deleting..." : "Delete My Data"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Gift Card Details Modal */}
       {viewingGiftCardPlanId && (

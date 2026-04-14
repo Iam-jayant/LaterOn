@@ -1,5 +1,5 @@
 import type { ApiConfig } from "../config";
-import type { CheckoutQuote } from "@lateron/sdk";
+import type { CheckoutQuote, PlanRecord } from "@lateron/sdk";
 import { logger } from "../lib/logger";
 import { createId } from "../lib/ids";
 import { nowUnix } from "../lib/time";
@@ -378,6 +378,21 @@ export class MarketplaceService {
    * @param signedTransactions - Array of base64-encoded signed transactions
    * @returns Gift card details with code and PIN
    */
+  /**
+   * Confirm marketplace checkout by submitting signed transactions and fulfilling gift card.
+   * 
+   * Flow:
+   * 1. Submit user's payment transaction (user → pool)
+   * 2. Wait for confirmation
+   * 3. Send payment from pool to merchant (automated)
+   * 4. Purchase gift card from Reloadly
+   * 5. Create BNPL plan in database
+   * 6. Deliver gift card to user
+   * 
+   * @param quoteId - Quote ID from createMarketplaceQuote
+   * @param signedTransactions - Array of base64-encoded signed transactions
+   * @returns Gift card details with code and PIN
+   */
   public async confirmCheckout(
     quoteId: string,
     signedTransactions: string[]
@@ -396,22 +411,92 @@ export class MarketplaceService {
     logger.info("Confirming marketplace checkout", {
       quoteId,
       productId: quote.productId,
-      transactionCount: signedTransactions.length
+      transactionCount: signedTransactions.length,
+      orderAmountAlgo: quote.orderAmountAlgo
     });
 
-    // Submit signed transactions and create plan
-    const plan = await this.contractGateway.createPlanFromSignedTransactions(
-      quoteId,
-      signedTransactions
+    // Step 1: Submit user's payment transaction (user → pool)
+    logger.info("Step 1: Submitting user payment to pool", { quoteId });
+    const userTxId = await this.contractGateway.chainService.submitSignedTransactions(signedTransactions);
+    
+    logger.info("User payment confirmed", { 
+      quoteId, 
+      txId: userTxId,
+      amount: quote.orderAmountAlgo 
+    });
+
+    // Step 2: Send payment from pool to merchant (automated backend payment)
+    logger.info("Step 2: Sending payment from pool to merchant", { quoteId });
+    
+    // For marketplace, merchant is Reloadly (we use pool address as placeholder)
+    // In production, this would be the actual merchant's Algorand address
+    const merchantAddress = this.config.lendingPoolAddress; // TODO: Use actual merchant address
+    
+    const poolTxId = await this.contractGateway.chainService.sendPoolPaymentToMerchant(
+      merchantAddress,
+      quote.orderAmountAlgo,
+      `Marketplace payment for quote ${quoteId}`
     );
 
-    logger.info("BNPL plan created for gift card purchase", {
-      planId: plan.planId,
+    logger.info("Pool payment to merchant confirmed", {
       quoteId,
-      productId: quote.productId
+      txId: poolTxId,
+      amount: quote.orderAmountAlgo
     });
 
-    // Purchase gift card from Reloadly
+    // Step 3: Create BNPL plan in database
+    const planId = createId("plan");
+    const createdAtUnix = nowUnix();
+    const installmentAmountAlgo = quote.orderAmountAlgo / this.config.marketplaceTenureMonths;
+    
+    // Calculate due dates for remaining installments (user already paid first)
+    const installments = [];
+    for (let i = 1; i < this.config.marketplaceTenureMonths; i++) {
+      installments.push({
+        dueAtUnix: createdAtUnix + (i * 30 * 24 * 60 * 60), // 30 days apart
+        amountAlgo: installmentAmountAlgo,
+        status: "PENDING" as const
+      });
+    }
+
+    const plan: PlanRecord = {
+      planId,
+      walletAddress: quote.walletAddress,
+      merchantId: this.config.marketplaceMerchantId,
+      status: "ACTIVE",
+      tierAtApproval: "NEW",
+      tenureMonths: this.config.marketplaceTenureMonths,
+      aprPercent: 0,
+      createdAtUnix,
+      nextDueAtUnix: installments[0]?.dueAtUnix ?? createdAtUnix,
+      financedAmountInr: quote.orderAmountInr,
+      financedAmountAlgo: quote.orderAmountAlgo,
+      remainingAmountAlgo: quote.orderAmountAlgo - installmentAmountAlgo, // First installment paid
+      installmentsPaid: 1, // User just paid first installment
+      installments
+    };
+
+    // Save plan to database
+    if (this.repository) {
+      await this.repository.savePlan(plan);
+      
+      // Update user's outstanding amount
+      const user = await this.repository.getOrCreateUser(quote.walletAddress);
+      user.activeOutstandingInr += plan.remainingAmountAlgo * quote.algoToInrRate;
+      await this.repository.updateUser(user);
+    }
+
+    logger.info("BNPL plan created", {
+      planId: plan.planId,
+      quoteId,
+      productId: quote.productId,
+      installmentsPaid: 1,
+      remainingInstallments: installments.length
+    });
+
+    // Step 4: Purchase gift card from Reloadly
+    logger.info("Step 4: Purchasing gift card from Reloadly", { quoteId, planId });
+    
     try {
       const fulfillment = await this.reloadlyService.purchaseGiftCard({
         productId: quote.productId,
@@ -439,15 +524,38 @@ export class MarketplaceService {
         await this.repository.insertGiftCard(giftCardDetails);
       }
 
-      logger.info("Gift card purchased and stored successfully", {
+      logger.info("Gift card purchased and delivered successfully", {
         planId: plan.planId,
+        quoteId,
         reloadlyTransactionId: fulfillment.transactionId,
-        productName: quote.productName
+        productName: quote.productName,
+        userTxId,
+        poolTxId
       });
 
       return giftCardDetails;
     } catch (error) {
-      // Fulfillment failed after plan creation - log error and throw
+      // Fulfillment failed after payments - critical error
+      logger.error("Gift card fulfillment failed after successful payments", {
+        planId: plan.planId,
+        quoteId,
+        userTxId,
+        poolTxId,
+        error
+      });
+
+      // Mark plan as failed
+      if (this.repository) {
+        await this.repository.updatePlan(planId, { status: "CANCELLED" });
+      }
+
+      throw new Error(
+        `Payment successful but gift card delivery failed. ` +
+        `Transaction IDs: User=${userTxId}, Pool=${poolTxId}. ` +
+        `Contact support with plan ID: ${planId}`
+      );
+    }
+  }
       logger.error("Gift card fulfillment failed after plan creation", {
         planId: plan.planId,
         quoteId,
