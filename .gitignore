@@ -32,6 +32,26 @@ yarn-error.log*
 !.env.example
 !.env.local.example
 
+# Database
+*.sql.backup
+*.db
+*.sqlite
+*.sqlite3
+
+# Documentation (temporary/local only)
+**/TEMP_*.md
+**/DEBUG_*.md
+**/TEST_*.md
+**/*_NOTES.md
+
+# Scripts (temporary/local only)
+**/generate-*.js
+**/generate-*.mjs
+**/verify-*.js
+**/verify-*.mjs
+**/test-*.js
+**/test-*.mjs
+
 # Python
 __pycache__
 *.pyc

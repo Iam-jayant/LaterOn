@@ -1,276 +1,506 @@
-# LaterOn
+# LaterOn - Decentralized BNPL Platform
 
-**Mint now. Settle later.**
+<div align="center">
 
-LaterOn is an Algorand-based Buy Now Pay Later (BNPL) protocol that enables users to make purchases with partial upfront payment and repay the balance in installments while building on-chain trust through repayment behavior.
+![LaterOn Logo](apps/web/public/images/logo.png)
 
-## 🏗️ Project Structure
+**Buy Now, Pay Later on the Blockchain**
 
-This monorepo contains the complete LaterOn v1 implementation:
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Algorand](https://img.shields.io/badge/Algorand-TestNet-00D1B2)](https://testnet.algoexplorer.io/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue)](https://www.typescriptlang.org/)
+[![Next.js](https://img.shields.io/badge/Next.js-15.0-black)](https://nextjs.org/)
 
-- **`apps/web`** - Borrower web application with modern landing page (Next.js 13+)
-- **`apps/admin`** - Protocol administration dashboard (Next.js)
-- **`apps/api`** - Backend API for checkout, quotes, repayments, risk management, and liquidity (Fastify + TypeScript)
-- **`packages/sdk`** - Shared domain types and utilities for repayment/risk calculations
-- **`packages/contracts`** - Algorand smart contracts (Python/AlgoKit)
-- **`.kiro/specs`** - Technical specifications and implementation plans
+[Features](#features) • [Architecture](#architecture) • [Getting Started](#getting-started) • [Documentation](#documentation)
 
-## ✨ Key Features
+</div>
 
-### v1 Core Implementation
-- **ALGO-only settlement** for checkout, lender liquidity, and repayments
-- **INR display context** via off-chain signed quote snapshots
-- **On-chain risk detection** with authoritative state transitions (`settle_risk`)
-- **Liquidity management** with graceful handling of insufficient pool funds
-- **Modern landing page** with neutral theme, interactive calculator, and responsive design
+---
 
-### Gift Card Marketplace (Reloadly Integration)
-- **Digital gift cards** from popular Indian brands (Amazon, Flipkart, Zomato, Swiggy, Myntra, Croma)
-- **BNPL for gift cards** with 3-month installment plans
-- **Instant fulfillment** with gift card codes and PINs delivered immediately after payment
-- **Real-time currency conversion** using CoinGecko API for ALGO/INR exchange rates
-- **Lending pool integration** for seamless merchant disbursement (R2PHG2AE5A53VASF6QVEMFXYM5KFLNTHKYQHZLMEO54L3NCKRFPY2BDP2A)
-- **Search and filtering** for easy gift card discovery
-- **Dashboard integration** to view purchased gift cards and payment schedules
+## 📋 Table of Contents
 
-### Security & Authentication
-- **Wallet authentication** via challenge/verify flow (`POST /v1/auth/challenge`, `POST /v1/auth/verify`)
-- **Protected API routes** with bearer token authentication (`AUTH_REQUIRED=true`)
-- **Merchant API security** with API key validation (`x-merchant-key`, `MERCHANT_AUTH_REQUIRED=true`)
-- **Idempotency enforcement** for checkout and repayment operations (`x-idempotency-key`, `REQUIRE_IDEMPOTENCY=true`)
-- **Rate limiting** with configurable per-minute request throttling (`RATE_LIMIT_PER_MINUTE`)
+- [Overview](#overview)
+- [Features](#features)
+- [Architecture](#architecture)
+- [Tech Stack](#tech-stack)
+- [Getting Started](#getting-started)
+- [Project Structure](#project-structure)
+- [Smart Contracts](#smart-contracts)
+- [API Documentation](#api-documentation)
+- [Environment Variables](#environment-variables)
+- [Development](#development)
+- [Testing](#testing)
+- [Deployment](#deployment)
+- [Contributing](#contributing)
+- [License](#license)
 
-### Algorand TestNet Integration
-- **Real contract relay** when chain mode is enabled (`CHAIN_ENABLED=true`)
-- **Deployed contracts**: BNPL App (758208746), Pool App (758208757)
-- **AlgoNode integration** via `https://testnet-api.algonode.cloud`
-- **Health monitoring** at `GET /health` endpoint with chain readiness status
-- **Development mode** with local simulation when chain is disabled
+---
 
-## 🚀 Quick Start
+## 🌟 Overview
+
+**LaterOn** is a decentralized Buy Now, Pay Later (BNPL) platform built on the Algorand blockchain. It enables users to purchase gift cards and other products with flexible installment payments, while maintaining transparency and security through blockchain technology.
+
+### Key Highlights
+
+- 🔐 **Decentralized**: Built on Algorand blockchain for transparency and security
+- 💳 **Flexible Payments**: Split purchases into 3 monthly installments
+- 🎁 **Instant Delivery**: Gift cards delivered immediately after first payment
+- 📊 **Credit Scoring**: On-chain credit score system using Algorand ASAs
+- 🔒 **DPDP Compliant**: Follows India's Digital Personal Data Protection Act 2023
+- ⚡ **Fast**: Transactions confirm in ~4 seconds on Algorand
+
+---
+
+## ✨ Features
+
+### For Users
+
+- **🛍️ Marketplace**: Browse and purchase gift cards from popular brands
+- **💰 BNPL Checkout**: Pay 1/3 upfront, rest in 2 monthly installments
+- **📱 Wallet Integration**: Connect with Pera Wallet, Defly, or other Algorand wallets
+- **📊 Dashboard**: Track active plans, payment history, and credit score
+- **🎯 Credit Score**: Earn better terms with on-time payments
+- **🔔 Notifications**: Get reminders for upcoming payments
+
+### For Merchants
+
+- **💵 Instant Payment**: Receive full amount immediately
+- **📈 Analytics**: Track sales and customer behavior
+- **🔌 API Integration**: Easy integration with existing systems
+- **🛡️ Risk-Free**: Platform handles all credit risk
+
+### For Developers
+
+- **🔧 Smart Contracts**: PyTeal-based contracts for BNPL logic
+- **📚 SDK**: TypeScript SDK for easy integration
+- **🔗 REST API**: Comprehensive API for all operations
+- **📖 Documentation**: Detailed docs and examples
+
+---
+
+## 🏗️ Architecture
+
+### System Overview
+
+```
+┌─────────────┐
+│   User      │
+│  (Wallet)   │
+└──────┬──────┘
+       │ 1. Pay 1st EMI
+       ↓
+┌─────────────┐
+│  LaterOn    │
+│   Pool      │
+└──────┬──────┘
+       │ 2. Pay Full Amount
+       ↓
+┌─────────────┐
+│  Merchant   │
+│  (Reloadly) │
+└──────┬──────┘
+       │ 3. Deliver Gift Card
+       ↓
+┌─────────────┐
+│    User     │
+└─────────────┘
+```
+
+### Transaction Flow
+
+1. **User Payment**: User pays first installment (1/3) to pool
+2. **Pool Payment**: Backend automatically pays full amount to merchant
+3. **Gift Card Delivery**: Merchant delivers gift card to user
+4. **Plan Creation**: BNPL plan created with 2 remaining installments
+5. **Future Payments**: User pays remaining installments over 2 months
+
+### Components
+
+- **Frontend**: Next.js 15 with TypeScript
+- **Backend API**: Hono.js REST API
+- **Smart Contracts**: PyTeal contracts on Algorand
+- **Database**: Supabase (PostgreSQL)
+- **Blockchain**: Algorand TestNet
+- **Gift Cards**: Reloadly API integration
+
+---
+
+## 🛠️ Tech Stack
+
+### Frontend
+- **Framework**: Next.js 15.5
+- **Language**: TypeScript 5.0
+- **Styling**: Tailwind CSS
+- **Wallet**: @txnlab/use-wallet
+- **State**: React Hooks
+
+### Backend
+- **Framework**: Hono.js
+- **Runtime**: Node.js 22
+- **Language**: TypeScript 5.0
+- **Database**: Supabase (PostgreSQL)
+- **ORM**: Direct SQL queries
+
+### Blockchain
+- **Network**: Algorand TestNet
+- **SDK**: algosdk 3.5
+- **Contracts**: PyTeal
+- **Indexer**: Algorand Indexer
+
+### Infrastructure
+- **Monorepo**: Turborepo
+- **Package Manager**: pnpm
+- **CI/CD**: GitHub Actions (optional)
+- **Hosting**: Vercel (frontend), Railway (backend)
+
+---
+
+## 🚀 Getting Started
 
 ### Prerequisites
 
-- **Node.js** 22+
-- **pnpm** 10+
-- **Python** 3.11+
-- **AlgoKit CLI** 3.x
-- **Docker Desktop** (for local Algorand localnet)
+- Node.js 22+ and pnpm
+- Algorand wallet (Pera Wallet recommended)
+- Supabase account
+- Reloadly API credentials (for gift cards)
 
 ### Installation
 
-```bash
-# Install dependencies
-pnpm install
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/yourusername/lateron.git
+   cd lateron
+   ```
+
+2. **Install dependencies**
+   ```bash
+   pnpm install
+   ```
+
+3. **Set up environment variables**
+   ```bash
+   # API
+   cp apps/api/.env.example apps/api/.env
+   # Edit apps/api/.env with your credentials
+
+   # Web
+   cp apps/web/.env.example apps/web/.env.local
+   # Edit apps/web/.env.local with your credentials
+   ```
+
+4. **Set up database**
+   ```bash
+   # Database migrations run automatically on API startup
+   # Or run manually:
+   pnpm --filter @lateron/api db:migrate
+   ```
+
+5. **Start development servers**
+   ```bash
+   # Start all services
+   pnpm dev
+
+   # Or start individually:
+   pnpm dev:api    # API server (port 4000)
+   pnpm dev:web    # Web app (port 3000)
+   ```
+
+6. **Access the application**
+   - Web App: http://localhost:3000
+   - API: http://localhost:4000
+   - API Docs: http://localhost:4000/docs
+
+---
+
+## 📁 Project Structure
+
+```
+lateron/
+├── apps/
+│   ├── api/                    # Backend API
+│   │   ├── src/
+│   │   │   ├── routes/        # API endpoints
+│   │   │   ├── services/      # Business logic
+│   │   │   ├── db/            # Database layer
+│   │   │   └── lib/           # Utilities
+│   │   ├── .env.example       # Environment template
+│   │   └── package.json
+│   │
+│   ├── web/                    # Frontend application
+│   │   ├── src/
+│   │   │   ├── app/           # Next.js app router
+│   │   │   ├── components/    # React components
+│   │   │   ├── hooks/         # Custom hooks
+│   │   │   └── lib/           # Utilities
+│   │   └── package.json
+│   │
+│   └── admin/                  # Admin dashboard (optional)
+│
+├── packages/
+│   ├── contracts/              # Smart contracts
+│   │   ├── src/lateron/       # PyTeal contracts
+│   │   └── artifacts/         # Compiled TEAL
+│   │
+│   └── sdk/                    # TypeScript SDK
+│       └── src/               # SDK source
+│
+├── .gitignore
+├── package.json
+├── pnpm-workspace.yaml
+├── turbo.json
+└── README.md
 ```
 
-### Running Applications
+---
 
-#### API Server
-```bash
-# Copy environment template
-cp apps/api/.env.example apps/api/.env
+## 📜 Smart Contracts
 
-# Start API server
-pnpm --filter @lateron/api dev
+### BNPL Contract
+
+**App ID**: `758251644` (TestNet)
+
+**Methods**:
+- `create_plan`: Create new BNPL plan
+- `repay_installment`: Record installment payment
+- `settle_risk`: Handle late/defaulted payments
+- `set_paused`: Emergency pause (admin only)
+
+**Storage**:
+- Global state: Protocol parameters
+- Box storage: Individual plan data
+- User boxes: Outstanding balances
+
+### Pool Contract
+
+**App ID**: `758251656` (TestNet)
+
+**Methods**:
+- `deposit`: Add liquidity to pool
+- `lend_out`: Lend to borrowers
+- `record_repayment`: Track repayments
+- `set_paused`: Emergency pause (admin only)
+
+---
+
+## 🔌 API Documentation
+
+### Base URL
+```
+Development: http://localhost:4000
+Production: https://api.lateron.app
 ```
 
-#### Web Application (Borrower)
+### Authentication
 ```bash
-# Copy environment template (if needed)
-cp apps/web/.env.example apps/web/.env.local
+# Get auth challenge
+POST /api/auth/challenge
+{
+  "walletAddress": "ALGORAND_ADDRESS"
+}
 
-# Start web app
-pnpm --filter @lateron/web dev
+# Submit signed challenge
+POST /api/auth/verify
+{
+  "walletAddress": "ALGORAND_ADDRESS",
+  "signature": "BASE64_SIGNATURE"
+}
 ```
 
-#### Admin Dashboard
-```bash
-pnpm --filter @lateron/admin dev
-```
-
-### Environment Configuration
-
-Key environment variables for `apps/api/.env`:
+### Marketplace Endpoints
 
 ```bash
-# Chain Configuration
-CHAIN_ENABLED=true
-BNPL_APP_ID=758208746
-POOL_APP_ID=758208757
-ALGOD_ADDRESS=https://testnet-api.algonode.cloud
-RELAYER_MNEMONIC=your_mnemonic_here
+# Get gift card catalog
+GET /api/marketplace/catalog
 
-# Security
-AUTH_REQUIRED=true
-MERCHANT_AUTH_REQUIRED=true
-REQUIRE_IDEMPOTENCY=true
-RATE_LIMIT_PER_MINUTE=60
+# Create quote
+POST /api/marketplace/quote
+{
+  "walletAddress": "ADDRESS",
+  "productId": 3695,
+  "denomination": 20
+}
 
-# Database (optional)
-POSTGRES_ENABLED=false
+# Prepare checkout
+POST /api/marketplace/checkout/prepare
+{
+  "quoteId": "quote_xxx"
+}
 
-# Reloadly API Configuration (Gift Card Marketplace)
-RELOADLY_CLIENT_ID=TxLI0dH46VVYIbNPx0wj2JoBDzQhKm11
-RELOADLY_CLIENT_SECRET=8rTpsH2X8P-7K7KW5lh9mdHDTOGBlR-blUyFc9OJlqjmU1bS59SULIsRXXmTnPD
-RELOADLY_BASE_URL=https://giftcards-sandbox.reloadly.com
-RELOADLY_AUTH_URL=https://auth.reloadly.com
-RELOADLY_TOKEN_CACHE_TTL_SECONDS=3600
-
-# CoinGecko API Configuration (Exchange Rates)
-COINGECKO_BASE_URL=https://api.coingecko.com/api/v3
-COINGECKO_RATE_CACHE_TTL_SECONDS=300
-COINGECKO_FALLBACK_RATE=0.0022
-
-# Marketplace Configuration
-MARKETPLACE_MERCHANT_ID=reloadly
-MARKETPLACE_TENURE_MONTHS=3
-LENDING_POOL_ADDRESS=R2PHG2AE5A53VASF6QVEMFXYM5KFLNTHKYQHZLMEO54L3NCKRFPY2BDP2A
+# Confirm checkout
+POST /api/marketplace/checkout/confirm
+{
+  "quoteId": "quote_xxx",
+  "signedTransactions": ["BASE64_TX"]
+}
 ```
 
-## 🧪 Smart Contract Development
+### User Endpoints
 
-### Python Environment Setup
+```bash
+# Get user profile
+GET /api/users/:walletAddress
+
+# Get user plans
+GET /api/users/:walletAddress/plans
+
+# Get gift cards
+GET /api/users/:walletAddress/gift-cards
+```
+
+---
+
+## 🔐 Environment Variables
+
+### Required Variables
+
+See `.env.example` files in each app for complete list.
+
+**Critical Variables**:
+- `RELAYER_MNEMONIC`: Pool account mnemonic (25 words)
+- `LENDING_POOL_ADDRESS`: Pool Algorand address
+- `SUPABASE_SERVICE_ROLE_KEY`: Supabase admin key
+- `RELOADLY_CLIENT_ID`: Reloadly API client ID
+- `RELOADLY_CLIENT_SECRET`: Reloadly API secret
+
+---
+
+## 💻 Development
+
+### Running Tests
+```bash
+# Run all tests
+pnpm test
+
+# Run API tests
+pnpm --filter @lateron/api test
+
+# Run web tests
+pnpm --filter @lateron/web test
+```
+
+### Building
+```bash
+# Build all apps
+pnpm build
+
+# Build specific app
+pnpm --filter @lateron/api build
+pnpm --filter @lateron/web build
+```
+
+### Linting
+```bash
+# Lint all code
+pnpm lint
+
+# Fix linting issues
+pnpm lint:fix
+```
+
+### Database Migrations
+```bash
+# Run migrations
+pnpm --filter @lateron/api db:migrate
+
+# Create new migration
+pnpm --filter @lateron/api db:migration:create <name>
+```
+
+---
+
+## 🧪 Testing
+
+### Test Coverage
+
+- Unit tests for business logic
+- Integration tests for API endpoints
+- E2E tests for critical user flows
+- Smart contract tests with PyTest
+
+### Running Specific Tests
+
+```bash
+# API tests
+cd apps/api
+pnpm test
+
+# Web tests
+cd apps/web
+pnpm test
+
+# Contract tests
+cd packages/contracts
+pytest
+```
+
+---
+
+## 🚢 Deployment
+
+### Frontend (Vercel)
+
+1. Connect GitHub repository to Vercel
+2. Set environment variables
+3. Deploy automatically on push to main
+
+### Backend (Railway/Render)
+
+1. Connect GitHub repository
+2. Set environment variables
+3. Configure build command: `pnpm --filter @lateron/api build`
+4. Configure start command: `pnpm --filter @lateron/api start`
+
+### Smart Contracts
+
 ```bash
 cd packages/contracts
-poetry install
-poetry run pytest
+python -m lateron.deploy
 ```
 
-### Compile Contracts
-```bash
-cd packages/contracts
-poetry run python compile_contracts.py
-```
-
-### Deploy to TestNet
-
-**With environment variable:**
-```bash
-cd packages/contracts
-DEPLOYER_MNEMONIC="your mnemonic here" poetry run python deploy_testnet.py \
-  --expected-address CYPMTG3YHOOQSOFZRIAKJNP2TB2Z7WW3OYCTMYL33MKZQQ5HCRALVZTCEA
-```
-
-**Interactive mode:**
-```bash
-cd packages/contracts
-poetry run python deploy_testnet.py \
-  --interactive-mnemonic \
-  --expected-address CYPMTG3YHOOQSOFZRIAKJNP2TB2Z7WW3OYCTMYL33MKZQQ5HCRALVZTCEA
-```
-
-**With private key:**
-```bash
-cd packages/contracts
-DEPLOYER_PRIVATE_KEY="<base64-private-key>" poetry run python deploy_testnet.py \
-  --expected-address CYPMTG3YHOOQSOFZRIAKJNP2TB2Z7WW3OYCTMYL33MKZQQ5HCRALVZTCEA
-```
-
-## 🎁 Gift Card Marketplace
-
-The marketplace feature integrates Reloadly's gift card API with LaterOn's BNPL protocol, allowing users to purchase digital gift cards using installment payments.
-
-### Reloadly Integration
-
-**Authentication:**
-- OAuth 2.0 client credentials flow
-- Automatic token caching with TTL management
-- Sandbox environment for testing
-
-**Supported Brands:**
-- Amazon India
-- Flipkart
-- Zomato
-- Swiggy
-- Myntra
-- Croma
-
-**API Endpoints:**
-- `GET /api/marketplace/catalog` - Fetch available gift cards
-- `POST /api/marketplace/quote` - Create BNPL quote with ALGO conversion
-- `POST /api/marketplace/checkout` - Execute purchase with atomic transaction
-- `GET /api/marketplace/gift-card/:planId` - Retrieve gift card details
-
-### CoinGecko Integration
-
-**Exchange Rate Service:**
-- Real-time ALGO/INR exchange rates
-- 5-minute rate caching for performance
-- Fallback to default rate (0.0022 ALGO/INR) if API unavailable
-- Automatic currency conversion for payment amounts
-
-**API Endpoint:**
-- `GET https://api.coingecko.com/api/v3/simple/price?ids=algorand&vs_currencies=inr`
-
-### Lending Pool Setup
-
-**TestNet Pool Address:**
-```
-R2PHG2AE5A53VASF6QVEMFXYM5KFLNTHKYQHZLMEO54L3NCKRFPY2BDP2A
-```
-
-**Pool Responsibilities:**
-- Receives user installment payments
-- Disburses merchant payments for gift card purchases
-- Maintains liquidity for instant fulfillment
-- Requires sufficient ALGO balance for demo operations
-
-**Transaction Flow:**
-1. User pays first installment to lending pool
-2. Pool disburses full amount to merchant (Reloadly)
-3. BNPL plan created on-chain with 3-month tenure
-4. Gift card code and PIN delivered instantly
-
-**Funding the Pool:**
-```bash
-# Send ALGO to pool address using Algorand wallet or CLI
-goal clerk send \
-  --from YOUR_ADDRESS \
-  --to R2PHG2AE5A53VASF6QVEMFXYM5KFLNTHKYQHZLMEO54L3NCKRFPY2BDP2A \
-  --amount 10000000 \
-  --note "Pool funding"
-```
-
-### User Flow
-
-1. **Browse Marketplace** - User lands on `/marketplace` after authentication
-2. **Search & Filter** - Find gift cards using search bar in navbar
-3. **Select Gift Card** - Choose brand and denomination (₹500, ₹1000, etc.)
-4. **Pay in 3** - View installment breakdown with ALGO/INR amounts
-5. **Connect Wallet** - Approve atomic transaction with Peria wallet
-6. **Instant Delivery** - Receive gift card code and PIN immediately
-7. **Track Payments** - View remaining installments on dashboard
-
-### Security Considerations
-
-- Gift card codes and PINs are never logged
-- Idempotency keys prevent duplicate purchases
-- Atomic transactions ensure payment and disbursement happen together
-- Authorization checks prevent unauthorized gift card access
-- Rate limiting protects against API abuse
-
-## 📚 Documentation
-
-- **Specifications**: See `.kiro/specs/` for detailed technical specifications
-- **API Health**: `GET /health` endpoint for system status
-- **Landing Page**: Modern UI with neutral theme, interactive calculator, and responsive design
-
-## 🛠️ Technology Stack
-
-- **Frontend**: Next.js 13+ (App Router), React, TypeScript, Tailwind CSS
-- **Backend**: Fastify, TypeScript, Node.js
-- **Blockchain**: Algorand (TestNet), AlgoKit, Python
-- **Database**: PostgreSQL (optional read-model mirroring)
-- **Package Manager**: pnpm (monorepo with workspaces)
-
-## 📄 License
-
-See [LICENSE](LICENSE) file for details.
+---
 
 ## 🤝 Contributing
 
-This is a production-oriented implementation. For contributions, please ensure:
-- TypeScript compilation passes (`tsc --noEmit`)
-- Code follows existing patterns and conventions
-- All environment variables are documented
+We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details.
+
+### Development Workflow
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Write/update tests
+5. Submit a pull request
+
+---
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+## 🙏 Acknowledgments
+
+- **Algorand Foundation** for blockchain infrastructure
+- **Reloadly** for gift card API
+- **Supabase** for database hosting
+- **Vercel** for frontend hosting
+
+---
+
+## 📞 Contact
+
+- **Website**: https://lateron.app
+- **Email**: support@lateron.app
+- **Twitter**: [@LaterOnApp](https://twitter.com/LaterOnApp)
+- **Discord**: [Join our community](https://discord.gg/lateron)
+
+---
+
+<div align="center">
+
+**Built with ❤️ on Algorand**
+
+[⬆ Back to Top](#lateron---decentralized-bnpl-platform)
+
+</div>
