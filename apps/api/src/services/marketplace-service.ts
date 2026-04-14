@@ -1,19 +1,103 @@
 import type { ApiConfig } from "../config";
-import type { CheckoutQuote, PlanRecord } from "@lateron/sdk";
+import { TIER_CAPS, type CheckoutQuote, type PlanRecord, type Tier } from "@lateron/sdk";
 import { logger } from "../lib/logger";
 import { createId } from "../lib/ids";
 import { nowUnix } from "../lib/time";
-import { ValidationError, NotFoundError } from "../errors";
+import { ValidationError, NotFoundError, CheckoutRetryRequiredError } from "../errors";
 import { ReloadlyService } from "./reloadly-service";
 import { CoinGeckoService } from "./coingecko-service";
 import { ContractGateway } from "./contract-gateway";
 import type { PostgresRepository } from "../db/postgres-repository";
 import type { ParsedReloadlyProduct } from "../lib/reloadly-types";
 import algosdk from "algosdk";
+import {
+  buildUserBoxName,
+  decodePlanIdFromBoxName,
+  MARKETPLACE_PLAN_BOX_LOOKAHEAD
+} from "./marketplace-checkout-boxes";
 
 // Supported brands for the marketplace
 // Note: Sandbox environment has gaming brands. Production would have retail brands like Amazon, Flipkart, etc.
 const SUPPORTED_BRANDS = ["Free Fire", "PUBG", "Steam", "Mobile Legends", "Fortnite", "Razer Gold"];
+const TIER_TO_INDEX: Record<Tier, number> = {
+  NEW: 0,
+  EMERGING: 1,
+  TRUSTED: 2
+};
+
+const bytesEqual = (left: Uint8Array | undefined, right: Uint8Array | undefined): boolean => {
+  if (!left || !right) {
+    return false;
+  }
+
+  return Buffer.compare(Buffer.from(left), Buffer.from(right)) === 0;
+};
+
+const addressMatches = (actual: algosdk.Address | undefined, expected: string): boolean => {
+  if (!actual) {
+    return false;
+  }
+
+  return algosdk.encodeAddress(actual.publicKey) === expected;
+};
+
+const extractPlanBoxRange = (
+  boxes: ReadonlyArray<{ appIndex: bigint; name: Uint8Array }>,
+  expectedAppId: number,
+  expectedUserBoxName: Uint8Array
+): { firstPlanId: number; lastPlanId: number; planBoxCount: number } => {
+  let hasUserBox = false;
+  const planIds: number[] = [];
+
+  for (const box of boxes) {
+    const decodedAppIndex = Number(box.appIndex);
+    const isOwnAppReference = decodedAppIndex === 0 || decodedAppIndex === expectedAppId;
+    if (!isOwnAppReference) {
+      throw new ValidationError("Prepared BNPL app call includes a box reference for an unexpected app");
+    }
+
+    if (bytesEqual(box.name, expectedUserBoxName)) {
+      if (hasUserBox) {
+        throw new ValidationError("Prepared BNPL app call contains duplicate borrower box references");
+      }
+      hasUserBox = true;
+      continue;
+    }
+
+    const planId = decodePlanIdFromBoxName(box.name);
+    if (planId === null) {
+      throw new ValidationError("Prepared BNPL app call includes an unexpected box reference");
+    }
+
+    planIds.push(planId);
+  }
+
+  if (!hasUserBox) {
+    throw new ValidationError("Prepared BNPL app call is missing the borrower box reference");
+  }
+
+  if (planIds.length === 0) {
+    throw new ValidationError("Prepared BNPL app call is missing plan box references");
+  }
+
+  planIds.sort((left, right) => left - right);
+
+  for (let index = 1; index < planIds.length; index += 1) {
+    if (planIds[index] !== planIds[index - 1] + 1) {
+      throw new ValidationError("Prepared BNPL app call plan box references are not contiguous");
+    }
+  }
+
+  if (planIds.length > MARKETPLACE_PLAN_BOX_LOOKAHEAD) {
+    throw new ValidationError("Prepared BNPL app call includes too many plan box references");
+  }
+
+  return {
+    firstPlanId: planIds[0],
+    lastPlanId: planIds[planIds.length - 1],
+    planBoxCount: planIds.length
+  };
+};
 
 // ============================================================================
 // Type Definitions
@@ -159,6 +243,15 @@ export class MarketplaceService {
       throw new ValidationError("Denomination not available for this product");
     }
 
+    const user = await this.contractGateway.getOrCreateUser(request.walletAddress);
+    const caps = TIER_CAPS[user.tier];
+    if (request.denomination > caps.maxOrderInr) {
+      throw new ValidationError("Order exceeds tier max order cap");
+    }
+    if (user.activeOutstandingInr + request.denomination > caps.maxOutstandingInr) {
+      throw new ValidationError("Order exceeds tier max outstanding cap");
+    }
+
     // Get ALGO/INR exchange rate
     const algoToInrRate = await this.coinGeckoService.getAlgoToInrRate();
 
@@ -203,6 +296,7 @@ export class MarketplaceService {
       quoteId,
       productId: request.productId,
       denomination: request.denomination,
+      tierAtApproval: user.tier,
       orderAmountAlgo,
       installmentAmountAlgo
     });
@@ -342,20 +436,28 @@ export class MarketplaceService {
     });
 
     try {
+      const user = await this.contractGateway.getOrCreateUser(quote.walletAddress);
+      const tierAtApproval = TIER_TO_INDEX[user.tier];
+
       // Build atomic transaction group (3 unsigned transactions)
       // Merchant address is pool for now (in production, use actual merchant address)
       const merchantAddress = this.config.lendingPoolAddress;
-      
+
+      if (!this.contractGateway.chainService) {
+        throw new Error("Blockchain service not available");
+      }
+
       const transactions = await this.contractGateway.chainService.buildMarketplaceTransactions(
         quote.walletAddress,
         quote.orderAmountAlgo,
         merchantAddress,
-        0 // tierAtApproval: 0=NEW (TODO: get from user profile)
+        tierAtApproval
       );
       
       logger.info("Atomic transaction group built successfully", {
         quoteId,
         totalTransactions: transactions.length,
+        tierAtApproval: user.tier,
         flow: "All 3 unsigned, user signs Txn 0, backend signs Txn 1 & 2 during confirm"
       });
 
@@ -415,30 +517,159 @@ export class MarketplaceService {
         throw new ValidationError(`Expected 3 transactions, got ${signedTransactions.length}`);
       }
 
-      logger.info("Confirming marketplace checkout - signing backend transactions", {
+      const user = await this.contractGateway.getOrCreateUser(quote.walletAddress);
+
+      logger.info("Confirming marketplace checkout - signing prepared backend transactions", {
         quoteId,
         productId: quote.productId,
         transactionCount: signedTransactions.length,
+        tierAtApproval: user.tier,
         totalAmount: quote.orderAmountAlgo,
         firstEmiAmount: quote.orderAmountAlgo / this.config.marketplaceTenureMonths
       });
 
-      // Decode transactions
-      const txn0Signed = new Uint8Array(Buffer.from(signedTransactions[0], 'base64')); // User-signed
-      const txn1Unsigned = algosdk.decodeUnsignedTransaction(new Uint8Array(Buffer.from(signedTransactions[1], 'base64')));
-      const txn2Unsigned = algosdk.decodeUnsignedTransaction(new Uint8Array(Buffer.from(signedTransactions[2], 'base64')));
-
-      // Sign Txn 1 & 2 with relayer
       const chainService = this.contractGateway.chainService as any;
       if (!chainService.signer) {
-        logger.error("Relayer not configured - cannot sign backend transactions", {
-          quoteId,
-          chainServiceEnabled: chainService.enabled,
-          chainServiceReady: chainService.isEnabled()
-        });
+        logger.error("Relayer not configured - cannot sign backend transactions", { quoteId });
         throw new Error("Relayer not configured");
       }
 
+      // Step 1: Decode the user-signed Txn0 to extract the group ID.
+      const txn0SignedBytes = new Uint8Array(Buffer.from(signedTransactions[0], 'base64'));
+      const txn0Decoded = algosdk.decodeSignedTransaction(txn0SignedBytes);
+      const groupId = txn0Decoded.txn.group;
+
+      if (!groupId) {
+        throw new ValidationError("User-signed transaction missing group ID");
+      }
+
+      logger.info("Extracted group ID from user-signed transaction", {
+        quoteId,
+        groupIdHex: Buffer.from(groupId).toString('hex')
+      });
+
+      // Step 2: Decode the prepared backend transactions preserved by the wallet.
+      const txn1Unsigned = algosdk.decodeUnsignedTransaction(
+        new Uint8Array(Buffer.from(signedTransactions[1], 'base64'))
+      );
+      const txn2Unsigned = algosdk.decodeUnsignedTransaction(
+        new Uint8Array(Buffer.from(signedTransactions[2], 'base64'))
+      );
+
+      if (!txn1Unsigned.group || !txn2Unsigned.group) {
+        throw new ValidationError("Prepared backend transactions are missing a group ID");
+      }
+
+      if (
+        Buffer.compare(Buffer.from(txn1Unsigned.group), Buffer.from(groupId)) !== 0 ||
+        Buffer.compare(Buffer.from(txn2Unsigned.group), Buffer.from(groupId)) !== 0
+      ) {
+        throw new ValidationError("Prepared backend transactions do not match the user-signed group");
+      }
+
+      const expectedTotalMicroAlgo = BigInt(Math.round(quote.orderAmountAlgo * 1_000_000));
+      const expectedFirstEmiMicroAlgo = BigInt(
+        Math.round((quote.orderAmountAlgo / this.config.marketplaceTenureMonths) * 1_000_000)
+      );
+      const expectedPoolAddress = this.config.lendingPoolAddress;
+      const expectedMerchantAddress = this.config.lendingPoolAddress;
+      const expectedTierIndex = TIER_TO_INDEX[user.tier];
+      const expectedBorrowerPublicKey = algosdk.decodeAddress(quote.walletAddress).publicKey;
+      const expectedPoolPublicKey = algosdk.decodeAddress(expectedPoolAddress).publicKey;
+      const expectedMerchantPublicKey = algosdk.decodeAddress(expectedMerchantAddress).publicKey;
+      const txn2AppArgs = txn2Unsigned.applicationCall?.appArgs ?? [];
+      const txn2Boxes = txn2Unsigned.applicationCall?.boxes ?? [];
+      const nextDueUnix =
+        txn2AppArgs.length >= 7 ? algosdk.decodeUint64(txn2AppArgs[6], "safe") : 0;
+      const minNextDueUnix = nowUnix() + (29 * 24 * 60 * 60);
+      const maxNextDueUnix = nowUnix() + (31 * 24 * 60 * 60);
+      const expectedUserBoxName = buildUserBoxName(quote.walletAddress);
+
+      if (
+        txn1Unsigned.type !== algosdk.TransactionType.pay ||
+        !txn1Unsigned.payment ||
+        !addressMatches(txn1Unsigned.sender, chainService.signer.sender) ||
+        !addressMatches(txn1Unsigned.payment.receiver, expectedMerchantAddress) ||
+        txn1Unsigned.payment.amount !== expectedTotalMicroAlgo ||
+        txn1Unsigned.rekeyTo !== undefined ||
+        txn1Unsigned.payment.closeRemainderTo !== undefined
+      ) {
+        throw new ValidationError("Prepared pool payment transaction does not match the expected quote");
+      }
+
+      if (
+        txn2Unsigned.type !== algosdk.TransactionType.appl ||
+        !txn2Unsigned.applicationCall ||
+        !addressMatches(txn2Unsigned.sender, chainService.signer.sender) ||
+        txn2Unsigned.applicationCall.appIndex !== BigInt(this.config.bnplAppId) ||
+        txn2Unsigned.applicationCall.onComplete !== algosdk.OnApplicationComplete.NoOpOC ||
+        txn2Unsigned.rekeyTo !== undefined ||
+        txn2AppArgs.length !== 8 ||
+        !bytesEqual(txn2AppArgs[0], new TextEncoder().encode("create_plan")) ||
+        !bytesEqual(txn2AppArgs[1], expectedBorrowerPublicKey) ||
+        !bytesEqual(txn2AppArgs[2], algosdk.encodeUint64(expectedTotalMicroAlgo)) ||
+        !bytesEqual(txn2AppArgs[3], algosdk.encodeUint64(expectedFirstEmiMicroAlgo)) ||
+        !bytesEqual(txn2AppArgs[4], expectedPoolPublicKey) ||
+        !bytesEqual(txn2AppArgs[5], expectedMerchantPublicKey) ||
+        nextDueUnix < minNextDueUnix ||
+        nextDueUnix > maxNextDueUnix ||
+        txn2AppArgs[7][0] !== expectedTierIndex
+      ) {
+        throw new ValidationError("Prepared BNPL app call does not match the expected quote");
+      }
+
+      const preparedPlanBoxRange = extractPlanBoxRange(
+        txn2Boxes,
+        this.config.bnplAppId,
+        expectedUserBoxName
+      );
+
+      try {
+        const currentPlanCounter =
+          await this.contractGateway.chainService?.getCurrentBnplPlanCounter?.();
+        const currentExpectedPlanId = (currentPlanCounter ?? 0) + 1;
+        if (
+          currentExpectedPlanId < preparedPlanBoxRange.firstPlanId ||
+          currentExpectedPlanId > preparedPlanBoxRange.lastPlanId
+        ) {
+          logger.warn("Prepared checkout became stale before relayer signing", {
+            quoteId,
+            currentExpectedPlanId,
+            preparedFirstPlanId: preparedPlanBoxRange.firstPlanId,
+            preparedLastPlanId: preparedPlanBoxRange.lastPlanId
+          });
+          throw new CheckoutRetryRequiredError(
+            "Checkout approval became stale before confirmation. Please retry and sign the refreshed checkout.",
+            {
+              currentExpectedPlanId,
+              preparedFirstPlanId: preparedPlanBoxRange.firstPlanId,
+              preparedLastPlanId: preparedPlanBoxRange.lastPlanId
+            }
+          );
+        }
+      } catch (error) {
+        if (error instanceof CheckoutRetryRequiredError) {
+          throw error;
+        }
+
+        logger.warn("Could not re-check BNPL plan counter before submission", {
+          quoteId,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+
+      logger.info("Decoded prepared backend transactions for relayer signing", {
+        quoteId,
+        txn1Type: txn1Unsigned.type,
+        txn2Type: txn2Unsigned.type,
+        txn2AppArgsCount: txn2AppArgs.length,
+        txn2BoxesCount: txn2Boxes.length,
+        txn2BoxAppIndices: txn2Boxes.map((box) => Number(box.appIndex)),
+        preparedFirstPlanId: preparedPlanBoxRange.firstPlanId,
+        preparedLastPlanId: preparedPlanBoxRange.lastPlanId
+      });
+
+      // Step 3: Sign Txn1 & Txn2 with relayer.
       logger.info("Signing backend transactions with relayer", {
         quoteId,
         relayerAddress: chainService.signer.sender
@@ -447,36 +678,39 @@ export class MarketplaceService {
       const txn1Signed = txn1Unsigned.signTxn(chainService.signer.privateKey);
       const txn2Signed = txn2Unsigned.signTxn(chainService.signer.privateKey);
 
-      // Combine all signed transactions
+      // Step 4: Combine all signed transactions.
       const completeAtomicGroup = [
-        Buffer.from(txn0Signed).toString('base64'),
+        Buffer.from(txn0SignedBytes).toString('base64'),
         Buffer.from(txn1Signed).toString('base64'),
         Buffer.from(txn2Signed).toString('base64')
       ];
 
-      // Submit atomic transaction group
+      // Step 5: Submit atomic transaction group.
       logger.info("Submitting complete atomic transaction group to blockchain", { quoteId });
-      
+
+      if (!this.contractGateway.chainService) {
+        throw new Error("Blockchain service not available");
+      }
       const txId = await this.contractGateway.chainService.submitSignedTransactions(completeAtomicGroup);
-      
-      logger.info("Atomic transaction group confirmed", { 
-        quoteId, 
+
+      logger.info("Atomic transaction group confirmed", {
+        quoteId,
         txId,
-        flow: "User→Pool (1st EMI), Pool→Merchant (full amount), BNPL contract (plan created)"
+        flow: "User->Pool (1st EMI), Pool->Merchant (full amount), BNPL create_plan (plan created)"
       });
 
       // Create BNPL plan in database
       const planId = createId("plan");
       const createdAtUnix = nowUnix();
       const installmentAmountAlgo = quote.orderAmountAlgo / this.config.marketplaceTenureMonths;
-      
+
       // Calculate due dates for remaining 2 installments (user already paid first)
       const installments = [];
       for (let i = 1; i < this.config.marketplaceTenureMonths; i++) {
         installments.push({
+          installmentNumber: i + 1,
           dueAtUnix: createdAtUnix + (i * 30 * 24 * 60 * 60),
-          amountAlgo: installmentAmountAlgo,
-          status: "PENDING" as const
+          amountAlgo: installmentAmountAlgo
         });
       }
 
@@ -485,7 +719,7 @@ export class MarketplaceService {
         walletAddress: quote.walletAddress,
         merchantId: this.config.marketplaceMerchantId,
         status: "ACTIVE",
-        tierAtApproval: "NEW",
+        tierAtApproval: user.tier,
         tenureMonths: this.config.marketplaceTenureMonths,
         aprPercent: 0,
         createdAtUnix,
@@ -497,26 +731,15 @@ export class MarketplaceService {
         installments
       };
 
-      // Save plan to database
+      // Save plan to database (giftCardDetails will be attached after Reloadly purchase below)
       if (this.repository) {
-        // Add gift card metadata to plan
-        plan.giftCardDetails = {
-          productId: quote.productId,
-          productName: quote.productName,
-          denomination: quote.denomination
-        };
-        
         await this.repository.savePlan(plan);
-        
+
         // Update user's outstanding amount
-        const user = await this.repository.getOrCreateUser(quote.walletAddress);
-        user.activeOutstandingInr += plan.remainingAmountAlgo * quote.algoToInrRate;
-        await this.repository.updateUser(user);
+        const repositoryUser = await this.repository.getOrCreateUser(quote.walletAddress);
+        repositoryUser.activeOutstandingInr += plan.remainingAmountAlgo * quote.algoToInrRate;
+        await this.repository.updateUser(repositoryUser);
       }
-      
-      // IMPORTANT: Also add plan to ContractGateway's in-memory store for read model
-      // Access the store directly since there's no public method
-      (this.contractGateway as any).store.plans.set(plan.planId, plan);
 
       logger.info("BNPL plan created in database", {
         planId: plan.planId,
@@ -529,7 +752,7 @@ export class MarketplaceService {
 
       // Purchase gift card from Reloadly
       logger.info("Purchasing gift card from Reloadly", { quoteId, planId });
-      
+
       try {
         const fulfillment = await this.reloadlyService.purchaseGiftCard({
           productId: quote.productId,
@@ -552,7 +775,22 @@ export class MarketplaceService {
         };
 
         if (this.repository) {
-          await this.repository.insertGiftCard(giftCardDetails);
+          try {
+            await this.repository.insertGiftCard(giftCardDetails);
+          } catch (persistenceError) {
+            logger.error("Gift card delivered but persistence failed", {
+              planId: plan.planId,
+              quoteId,
+              reloadlyTransactionId: fulfillment.transactionId,
+              persistenceError:
+                persistenceError instanceof Error
+                  ? {
+                      message: persistenceError.message,
+                      stack: persistenceError.stack
+                    }
+                  : persistenceError
+            });
+          }
         }
 
         logger.info("Gift card purchased and delivered successfully", {
@@ -569,13 +807,14 @@ export class MarketplaceService {
           planId: plan.planId,
           quoteId,
           blockchainTxId: txId,
-          error: error instanceof Error ? error.message : String(error),
+          error:
+            error instanceof Error
+              ? error.message
+              : error && typeof error === "object"
+                ? JSON.stringify(error)
+                : String(error),
           errorStack: error instanceof Error ? error.stack : undefined
         });
-
-        if (this.repository) {
-          await this.repository.updatePlan(planId, { status: "CANCELLED" });
-        }
 
         throw new Error(
           `Payment successful but gift card delivery failed. ` +
@@ -584,6 +823,18 @@ export class MarketplaceService {
         );
       }
     } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message.includes("invalid Box reference")
+      ) {
+        throw new CheckoutRetryRequiredError(
+          "Checkout approval became stale before confirmation. Please retry and sign the refreshed checkout.",
+          {
+            reason: error.message
+          }
+        );
+      }
+
       // Log the full error for debugging
       logger.error("confirmCheckout failed with error", {
         quoteId,
@@ -591,7 +842,7 @@ export class MarketplaceService {
         errorStack: error instanceof Error ? error.stack : undefined,
         errorName: error instanceof Error ? error.constructor.name : typeof error
       });
-      
+
       // Re-throw to be handled by route handler
       throw error;
     }

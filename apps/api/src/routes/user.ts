@@ -1,5 +1,6 @@
 import type { Hono } from "hono";
 import { z } from "zod";
+import { TIER_CAPS } from "@lateron/sdk";
 import { ValidationError, UnauthorizedError, ForbiddenError } from "../errors.js";
 import { logger } from "../lib/logger.js";
 import type { AppContext } from "../app-context.js";
@@ -33,6 +34,12 @@ const resolveWalletFromAuth = (c: any): string => {
   const token = authHeader.slice("Bearer ".length).trim();
   const payload = c.var.ctx.authService.verifyToken(token, c.var.ctx.config.authTokenSecret);
   return payload.walletAddress;
+};
+
+const assertWalletMatch = (authenticatedWalletAddress: string, requestedWalletAddress: string): void => {
+  if (authenticatedWalletAddress !== requestedWalletAddress) {
+    throw new UnauthorizedError("Wallet address does not match authenticated user");
+  }
 };
 
 /**
@@ -91,6 +98,84 @@ const registerProfileRoute = (app: HonoApp): void => {
         }
       }, 500);
     }
+  });
+};
+
+const registerUserProfileFetchRoute = (app: HonoApp): void => {
+  app.get("/api/user/:walletAddress", async (c) => {
+    const walletAddress = c.req.param("walletAddress");
+    const authenticatedWalletAddress = resolveWalletFromAuth(c);
+    assertWalletMatch(authenticatedWalletAddress, walletAddress);
+
+    const repository = c.var.ctx.repository;
+    const user = repository
+      ? await repository.getUser(walletAddress)
+      : await c.var.ctx.gateway.getOrCreateUser(walletAddress);
+
+    if (!user) {
+      return c.json({
+        error: {
+          code: "USER_NOT_FOUND",
+          message: "User not found",
+          details: null,
+        }
+      }, 404);
+    }
+
+    const plans = repository
+      ? await repository.getPlansByWallet(walletAddress)
+      : await c.var.ctx.gateway.listPlansByWallet(walletAddress);
+    const activePlans = plans.filter((plan) => plan.status === "ACTIVE" || plan.status === "LATE").length;
+    const capacityRemainingInr = Math.max(0, TIER_CAPS[user.tier].maxOutstandingInr - user.activeOutstandingInr);
+    const capacityAlgo = Number((capacityRemainingInr * c.var.ctx.config.defaultAlgoPerInr).toFixed(6));
+
+    const extendedUser = user as typeof user & {
+      scoreAsaId?: number;
+      name?: string | null;
+      email?: string | null;
+    };
+
+    return c.json({
+      walletAddress: user.walletAddress,
+      tier: user.tier,
+      capacityAlgo,
+      completedPlans: user.completedPlans,
+      activePlans,
+      laterOnScore: user.laterOnScore,
+      scoreAsaId: extendedUser.scoreAsaId ?? null,
+      name: extendedUser.name ?? null,
+      email: extendedUser.email ?? null,
+    }, 200);
+  });
+};
+
+const registerUserPlansRoute = (app: HonoApp): void => {
+  app.get("/api/user/:walletAddress/plans", async (c) => {
+    const walletAddress = c.req.param("walletAddress");
+    const authenticatedWalletAddress = resolveWalletFromAuth(c);
+    assertWalletMatch(authenticatedWalletAddress, walletAddress);
+
+    const repository = c.var.ctx.repository;
+    const plans = repository
+      ? await repository.getPlansByWallet(walletAddress)
+      : await c.var.ctx.gateway.listPlansByWallet(walletAddress);
+
+    const plansWithProductNames = repository
+      ? await Promise.all(
+          plans.map(async (plan) => {
+            const giftCard = await repository.getGiftCardByPlanId(plan.planId);
+            return {
+              ...plan,
+              productName: giftCard?.productName ?? null,
+            };
+          })
+        )
+      : plans.map((plan) => ({
+          ...plan,
+          productName: null,
+        }));
+
+    return c.json(plansWithProductNames, 200);
   });
 };
 
@@ -692,4 +777,6 @@ export const registerUserRoutes = (app: HonoApp): void => {
   registerDeleteUserRoute(app);
   registerRecoverScoreASARoute(app);
   registerPurchasesRoute(app);
+  registerUserProfileFetchRoute(app);
+  registerUserPlansRoute(app);
 };

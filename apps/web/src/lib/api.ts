@@ -4,7 +4,7 @@ export interface Plan {
   planId: string;
   walletAddress: string;
   merchantId: string;
-  status: 'ACTIVE' | 'COMPLETED' | 'DEFAULTED';
+  status: 'ACTIVE' | 'COMPLETED' | 'DEFAULTED' | 'LATE' | 'CANCELLED';
   tierAtApproval: string;
   tenureMonths: number;
   aprPercent: number;
@@ -19,6 +19,7 @@ export interface Plan {
     dueAtUnix: number;
     amountAlgo: number;
   }>;
+  productName?: string | null;
 }
 
 export interface UserProfile {
@@ -27,6 +28,10 @@ export interface UserProfile {
   capacityAlgo: number;
   completedPlans: number;
   activePlans: number;
+  laterOnScore?: number;
+  scoreAsaId?: number | null;
+  name?: string | null;
+  email?: string | null;
 }
 
 export interface CheckoutQuote {
@@ -64,8 +69,11 @@ export class ApiClient {
     });
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ message: 'Request failed' }));
-      throw new Error(error.message || `HTTP ${response.status}`);
+      const error = await response.json().catch(() => ({ message: 'Request failed' })) as {
+        message?: string;
+        error?: { message?: string };
+      };
+      throw new Error(error.error?.message || error.message || `HTTP ${response.status}`);
     }
 
     return response.json();
@@ -235,11 +243,16 @@ export class ApiClient {
     accessedBy: string;
     accessedAt: string;
   }>> {
-    return this.request('/api/user/data-access-log', {
+    const response = await this.request<{ logs: Array<{
+      operation: string;
+      accessedBy: string;
+      accessedAt: string;
+    }> }>('/api/user/data-access-log', {
       headers: {
         authorization: `Bearer ${authToken}`,
       },
     });
+    return response.logs;
   }
 
   // User Deletion API

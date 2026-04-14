@@ -41,6 +41,31 @@ interface GiftCardDetails {
 
 type CheckoutStep = "quote" | "wallet" | "processing" | "success" | "error";
 
+interface ApiErrorPayload {
+  error?: {
+    message?: string;
+    code?: string;
+    details?: {
+      reason?: string;
+      currentExpectedPlanId?: number;
+      preparedFirstPlanId?: number;
+      preparedLastPlanId?: number;
+    } | null;
+  };
+}
+
+const parseApiErrorPayload = (responseText: string): ApiErrorPayload | null => {
+  if (!responseText.trim()) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(responseText) as ApiErrorPayload;
+  } catch {
+    return null;
+  }
+};
+
 export function GiftCardCheckoutModal({
   isOpen,
   productName,
@@ -130,16 +155,21 @@ export function GiftCardCheckoutModal({
       });
 
       if (!prepareResponse.ok) {
-        const errorData = await prepareResponse.json() as { error?: { message?: string; code?: string } };
-        console.error("Prepare checkout error:", errorData);
+        const responseText = await prepareResponse.text();
+        const errorData = parseApiErrorPayload(responseText);
+        console.error(
+          "Prepare checkout failed:",
+          `status=${prepareResponse.status} ${prepareResponse.statusText}`,
+          responseText.substring(0, 500)
+        );
         
-        if (errorData.error?.code === "INSUFFICIENT_LIQUIDITY") {
+        if (errorData?.error?.code === "INSUFFICIENT_LIQUIDITY") {
           throw new Error("Insufficient pool liquidity. Please try again later.");
-        } else if (errorData.error?.code === "QUOTE_EXPIRED") {
+        } else if (errorData?.error?.code === "QUOTE_EXPIRED") {
           throw new Error("Quote expired. Please create a new quote.");
         }
         
-        throw new Error(errorData.error?.message || "Failed to prepare checkout. Please try again.");
+        throw new Error(errorData?.error?.message || "Failed to prepare checkout. Please try again.");
       }
 
       const prepareData = await prepareResponse.json() as { transactions: string[] };
@@ -193,18 +223,42 @@ export function GiftCardCheckoutModal({
       });
 
       if (!confirmResponse.ok) {
-        const errorData = await confirmResponse.json() as { error?: { message?: string; code?: string } };
-        console.error("Confirm checkout error:", errorData);
+        const responseText = await confirmResponse.text();
+        const errorData = parseApiErrorPayload(responseText);
+        console.error(
+          "Confirm checkout failed:",
+          `status=${confirmResponse.status} ${confirmResponse.statusText}`,
+          responseText.substring(0, 500)
+        );
         
-        if (errorData.error?.code === "INSUFFICIENT_BALANCE") {
-          throw new Error(errorData.error.message || "Insufficient ALGO balance. Please fund your wallet.");
+        if (errorData?.error?.code === "INSUFFICIENT_BALANCE") {
+          throw new Error(errorData.error?.message || "Insufficient ALGO balance. Please fund your wallet.");
         }
         
-        if (errorData.error?.code === "FULFILLMENT_FAILED") {
-          throw new Error(errorData.error.message || "Gift card delivery failed");
+        if (errorData?.error?.code === "FULFILLMENT_FAILED") {
+          throw new Error(errorData.error?.message || "Gift card delivery failed");
         }
-        
-        throw new Error(errorData.error?.message || "Failed to confirm checkout. Please try again.");
+
+        if (errorData?.error?.code === "CHECKOUT_RETRY_REQUIRED") {
+          throw new Error(
+            errorData.error?.message ||
+            "Checkout approval became stale before confirmation. Please retry."
+          );
+        }
+
+        if (errorData?.error?.code === "SMART_CONTRACT_REJECTED") {
+          const reason = errorData.error.details?.reason;
+          throw new Error(
+            reason
+              ? `${errorData.error.message ?? "Checkout was rejected on-chain."} ${reason}`
+              : (errorData.error.message ?? "Checkout was rejected on-chain.")
+          );
+        }
+
+        throw new Error(
+          errorData?.error?.message ??
+          `Checkout failed with status ${confirmResponse.status}. Please check the backend logs for details.`
+        );
       }
 
       const confirmData = await confirmResponse.json() as {
@@ -252,6 +306,8 @@ export function GiftCardCheckoutModal({
   if (!isOpen) return null;
 
   const canClose = step === "success" || step === "error";
+  const giftCardCode = giftCard?.code?.trim() ?? "";
+  const giftCardPin = giftCard?.pin?.trim() ?? "";
 
   return (
     <div 
@@ -628,10 +684,26 @@ export function GiftCardCheckoutModal({
 
         {step === "success" && giftCard && (
           <>
-            <div style={{ fontSize: '64px', marginBottom: '16px' }}>✅</div>
+            <div
+              style={{
+                width: '64px',
+                height: '64px',
+                margin: '0 auto 16px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: 'rgba(215, 227, 119, 0.35)',
+                borderRadius: '50%',
+                border: '1px solid rgba(0, 0, 0, 0.08)'
+              }}
+            >
+              <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#1f7a45" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M20 7L10 17l-5-5" />
+              </svg>
+            </div>
             <h2 style={{ 
               fontSize: '24px', 
-              fontWeight: 600, 
+              fontWeight: 700, 
               margin: '0 0 12px 0', 
               color: 'var(--foreground)',
               fontFamily: 'var(--font-heading)' 
@@ -652,80 +724,98 @@ export function GiftCardCheckoutModal({
               style={{
                 border: "1px solid var(--border)",
                 borderRadius: "12px",
-                padding: "16px",
+                padding: "18px",
                 marginBottom: "24px",
-                backgroundColor: "var(--muted)",
+                backgroundColor: "var(--background)",
                 textAlign: "left"
               }}
             >
               <div style={{ marginBottom: "16px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <label style={{ fontSize: "12px", fontWeight: 600, display: "block", marginBottom: "4px", fontFamily: "var(--font-heading)" }}>
+                  <label style={{ fontSize: "12px", fontWeight: 600, display: "block", marginBottom: "4px", color: "var(--foreground)", fontFamily: "var(--font-sans)", letterSpacing: "0.04em", textTransform: "uppercase" }}>
                     Gift Card Code:
                   </label>
                   <button
-                    onClick={() => handleCopy("code", giftCard.code)}
+                    onClick={() => handleCopy("code", giftCardCode)}
+                    disabled={!giftCardCode}
                     style={{
                       padding: "8px 16px",
                       fontSize: "12px",
+                      fontWeight: 600,
                       fontFamily: "var(--font-sans)",
                       border: "1px solid var(--border)",
                       borderRadius: "6px",
-                      background: "var(--background)",
+                      color: "var(--foreground)",
+                      background: "rgba(215, 227, 119, 0.22)",
                       cursor: "pointer",
                       minWidth: "44px",
                       minHeight: "44px",
                       touchAction: "manipulation",
+                      opacity: giftCardCode ? 1 : 0.6
                     }}
                   >
-                    {copiedField === "code" ? "✓ Copied" : "Copy"}
+                    {copiedField === "code" ? "Copied" : "Copy"}
                   </button>
                 </div>
                 <p
                   style={{
-                    margin: "4px 0 0",
-                    fontSize: "16px",
+                    margin: "6px 0 0",
+                    fontSize: "15px",
                     fontFamily: "monospace",
                     fontWeight: 600,
-                    wordBreak: "break-all"
+                    color: "var(--foreground)",
+                    wordBreak: "break-all",
+                    background: "rgba(215, 227, 119, 0.16)",
+                    border: "1px solid rgba(0, 0, 0, 0.08)",
+                    borderRadius: "8px",
+                    padding: "10px 12px"
                   }}
                 >
-                  {giftCard.code}
+                  {giftCardCode || "Not available"}
                 </p>
               </div>
 
               <div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <label style={{ fontSize: "12px", fontWeight: 600, display: "block", marginBottom: "4px", fontFamily: "var(--font-heading)" }}>
+                  <label style={{ fontSize: "12px", fontWeight: 600, display: "block", marginBottom: "4px", color: "var(--foreground)", fontFamily: "var(--font-sans)", letterSpacing: "0.04em", textTransform: "uppercase" }}>
                     PIN:
                   </label>
                   <button
-                    onClick={() => handleCopy("pin", giftCard.pin)}
+                    onClick={() => handleCopy("pin", giftCardPin)}
+                    disabled={!giftCardPin}
                     style={{
                       padding: "8px 16px",
                       fontSize: "12px",
+                      fontWeight: 600,
                       fontFamily: "var(--font-sans)",
                       border: "1px solid var(--border)",
                       borderRadius: "6px",
-                      background: "var(--background)",
+                      color: "var(--foreground)",
+                      background: "rgba(215, 227, 119, 0.22)",
                       cursor: "pointer",
                       minWidth: "44px",
                       minHeight: "44px",
                       touchAction: "manipulation",
+                      opacity: giftCardPin ? 1 : 0.6
                     }}
                   >
-                    {copiedField === "pin" ? "✓ Copied" : "Copy"}
+                    {copiedField === "pin" ? "Copied" : "Copy"}
                   </button>
                 </div>
                 <p
                   style={{
-                    margin: "4px 0 0",
-                    fontSize: "16px",
+                    margin: "6px 0 0",
+                    fontSize: "15px",
                     fontFamily: "monospace",
-                    fontWeight: 600
+                    fontWeight: 600,
+                    color: "var(--foreground)",
+                    background: "rgba(215, 227, 119, 0.16)",
+                    border: "1px solid rgba(0, 0, 0, 0.08)",
+                    borderRadius: "8px",
+                    padding: "10px 12px"
                   }}
                 >
-                  {giftCard.pin}
+                  {giftCardPin || "Not available"}
                 </p>
               </div>
 

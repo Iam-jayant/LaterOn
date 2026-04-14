@@ -135,16 +135,20 @@ export function decodeUnsignedTransactions(
   return base64Txns.map((base64Txn) => {
     const txnBytes = Buffer.from(base64Txn, "base64");
     const txn = algosdk.decodeUnsignedTransaction(txnBytes);
+    const mutableTxn = txn as unknown as {
+      genesisHash?: Uint8Array;
+      genesisID?: string;
+    };
     
     // Ensure transaction has network parameters for TestNet
     // These are required by wallet signing libraries
     if (!txn.genesisHash) {
       // TestNet genesis hash (base64)
-      txn.genesisHash = "SGO1GKSzyE7IEPItTxCByw9x8FmnrCDexi9/cOUJOiI=";
+      mutableTxn.genesisHash = Buffer.from("SGO1GKSzyE7IEPItTxCByw9x8FmnrCDexi9/cOUJOiI=", "base64");
     }
     if (!txn.genesisID) {
       // TestNet genesis ID
-      txn.genesisID = "testnet-v1.0";
+      mutableTxn.genesisID = "testnet-v1.0";
     }
     
     return txn;

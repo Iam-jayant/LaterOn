@@ -10,6 +10,8 @@ import { ensureWalletToken } from '@/lib/auth';
 import { ConsentModal, ScoreReveal, ASAOptIn } from '@/components/onboarding';
 import { PRIMARY, BACKGROUND, TEXT, SUCCESS, ERROR } from '@/lib/colors';
 
+const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
+
 type OnboardingStep = 
   | 'wallet' 
   | 'consent' 
@@ -42,33 +44,38 @@ export default function ConnectPage() {
       setWalletAddress(shortAddress);
       setFullWalletAddress(address);
 
-      // Check if user exists
-      const { exists } = await apiClient.checkUserExists(address);
-      
-      if (exists) {
-        // Existing user - skip onboarding and go to marketplace
-        router.push('/marketplace');
-      } else {
-        // New user - check if consent already given
-        try {
-          const token = await ensureWalletToken(address);
-          if (token) {
-            const hasConsent = await apiClient.checkConsent(token, 'credit_scoring');
-            if (hasConsent) {
-              // Consent already given, skip to profile
-              setAuthToken(token);
-              setStep('profile');
-              return;
-            }
-          }
-        } catch (err) {
-          // If consent check fails, proceed to consent step
-          console.log('Consent check failed, showing consent modal');
-        }
-        
-        // No consent yet - start onboarding with consent
-        setStep('consent');
+      const token = await ensureWalletToken(address);
+      if (token) {
+        setAuthToken(token);
       }
+
+      let existingProfile: Awaited<ReturnType<typeof apiClient.getUserProfile>> | null = null;
+      try {
+        if (token) {
+          existingProfile = await apiClient.getUserProfile(address, token);
+        }
+      } catch {
+        existingProfile = null;
+      }
+
+      if (existingProfile?.name && existingProfile?.email) {
+        router.push('/marketplace');
+        return;
+      }
+
+      try {
+        if (token) {
+          const hasConsent = await apiClient.checkConsent(token, 'credit_scoring');
+          if (hasConsent) {
+            setStep('profile');
+            return;
+          }
+        }
+      } catch (err) {
+        console.log('Consent check failed, showing consent modal');
+      }
+
+      setStep('consent');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to connect wallet');
     } finally {
@@ -118,7 +125,6 @@ export default function ConnectPage() {
 
       // Save profile to backend (name and email are now required)
       try {
-        const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
         const res = await fetch(`${apiBase}/api/user/profile`, {
           method: 'POST',
           headers: { 
@@ -162,7 +168,6 @@ export default function ConnectPage() {
     try {
       // Step 1: Create Score ASA on backend
       console.log('[ScoreReveal] Step 1: Calling /api/user/create-score-asa');
-      const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
       const createRes = await fetch(`${apiBase}/api/user/create-score-asa`, {
         method: 'POST',
         headers: { 
@@ -216,7 +221,7 @@ export default function ConnectPage() {
 
   const handleOptInConfirmed = async () => {
     try {
-      await fetch('/api/user/transfer-score-asa', {
+      await fetch(`${apiBase}/api/user/transfer-score-asa`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',

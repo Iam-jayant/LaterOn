@@ -1,10 +1,24 @@
 import type { Hono } from "hono";
 import { z } from "zod";
-import { ValidationError, NotFoundError, ForbiddenError } from "../errors.js";
+import {
+  ValidationError,
+  NotFoundError,
+  ForbiddenError,
+  CheckoutRetryRequiredError
+} from "../errors.js";
 import { logger } from "../lib/logger.js";
 import type { AppContext } from "../app-context.js";
 
 type HonoApp = Hono<{ Variables: { ctx: AppContext } }>;
+
+const extractLogicEvalDetails = (message: string): string | null => {
+  const logicEvalIndex = message.indexOf("logic eval error:");
+  if (logicEvalIndex === -1) {
+    return null;
+  }
+
+  return message.slice(logicEvalIndex + "logic eval error:".length).trim();
+};
 
 /**
  * Marketplace API Routes
@@ -469,12 +483,43 @@ const registerCheckoutConfirmRoute = (app: HonoApp): void => {
       }
 
       if (error instanceof Error) {
+        if (error instanceof CheckoutRetryRequiredError) {
+          return c.json({
+            error: {
+              code: error.code,
+              message: error.message,
+              details: error.detail ?? null
+            }
+          }, error.statusCode as 409);
+        }
+
         if (error.message.includes("Quote expired")) {
           return c.json({
             error: {
               code: "QUOTE_EXPIRED",
               message: "Quote expired. Please create a new quote.",
               details: null
+            }
+          }, 400);
+        }
+
+        const logicEvalDetails = extractLogicEvalDetails(error.message);
+        if (logicEvalDetails) {
+          if (logicEvalDetails.includes("invalid Box reference")) {
+            return c.json({
+              error: {
+                code: "CHECKOUT_RETRY_REQUIRED",
+                message: "Checkout approval became stale before confirmation. Please retry and sign the refreshed checkout.",
+                details: { reason: logicEvalDetails }
+              }
+            }, 409);
+          }
+
+          return c.json({
+            error: {
+              code: "SMART_CONTRACT_REJECTED",
+              message: "Checkout was rejected by the on-chain contract.",
+              details: { reason: logicEvalDetails }
             }
           }, 400);
         }
@@ -494,14 +539,18 @@ const registerCheckoutConfirmRoute = (app: HonoApp): void => {
         }
 
         if (error.message.includes("gift card delivery failed")) {
-          const txIdMatch = error.message.match(/transaction ID: ([a-zA-Z0-9_-]+)/);
+          const txIdMatch =
+            error.message.match(/Blockchain transaction: ([A-Z0-9]+)/) ??
+            error.message.match(/transaction ID: ([a-zA-Z0-9_-]+)/);
           const txId = txIdMatch ? txIdMatch[1] : "unknown";
+          const planIdMatch = error.message.match(/plan ID: ([a-zA-Z0-9_-]+)/);
+          const planId = planIdMatch ? planIdMatch[1] : null;
           
           return c.json({
             error: {
               code: "FULFILLMENT_FAILED",
               message: `Payment received but gift card delivery failed. Contact support with transaction ID: ${txId}`,
-              details: null
+              details: planId ? { planId } : null
             }
           }, 500);
         }

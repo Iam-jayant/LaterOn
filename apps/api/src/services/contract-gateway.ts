@@ -25,7 +25,7 @@ import type { ContractEvent, InMemoryStore, ProtocolParams } from "./store";
 export class ContractGateway {
   public constructor(
     private readonly store: InMemoryStore,
-    private readonly chainService?: AlgorandAppService,
+    public readonly chainService?: AlgorandAppService,
     private readonly repository?: PostgresRepository,
     private readonly scoreASALifecycleService?: any // Import type later to avoid circular dependency
   ) {}
@@ -597,7 +597,9 @@ export class ContractGateway {
 
     const unsignedTxns = await this.chainService.buildMarketplaceTransactions(
       quote.walletAddress,
-      quote.financedAmountAlgo
+      quote.financedAmountAlgo,
+      quote.walletAddress, // merchantAddress defaults to wallet for this code path
+      0 // tierAtApproval: NEW
     );
 
     return unsignedTxns;
